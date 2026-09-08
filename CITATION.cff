@@ -4,8 +4,8 @@ title: "BasinRAG: High-Performance Topological Retrieval-Augmented Generation vi
 authors:
   - family-names: "Martins"
     given-names: "Alex"
-version: 0.2.1
-date-released: 2026-09-06
+version: 1.0.2
+date-released: 2026-09-08
 repository-code: "https://github.com/alexmart1ns/BasinRAG"
 keywords:
   - "rag"

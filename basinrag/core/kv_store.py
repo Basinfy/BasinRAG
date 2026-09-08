@@ -2,7 +2,7 @@ import os
 import sqlite3
 import json
 import threading
-from typing import Any, Optional, Iterable, Dict, List, Tuple
+from typing import Any, Optional, Iterable, Iterator, Dict, List, Tuple
 
 class DiskKVStore:
     """
@@ -78,28 +78,76 @@ class DiskKVStore:
                 )
             return val
 
+    def iter_keys(self, batch_size: int = 2000) -> Iterator[str]:
+        """Iterador com streaming paginado para evitar picos de memória RAM."""
+        offset = 0
+        while True:
+            with self._lock:
+                cursor = self.conn.execute(
+                    f'SELECT key FROM "{self.table_name}" LIMIT ? OFFSET ?',
+                    (batch_size, offset)
+                )
+                rows = cursor.fetchall()
+            if not rows:
+                break
+            for row in rows:
+                yield row[0]
+            if len(rows) < batch_size:
+                break
+            offset += len(rows)
+
+    def iter_items(self, batch_size: int = 2000) -> Iterator[Tuple[str, Any]]:
+        """Iterador com streaming paginado de pares (chave, valor) decodificados."""
+        offset = 0
+        while True:
+            with self._lock:
+                cursor = self.conn.execute(
+                    f'SELECT key, value FROM "{self.table_name}" LIMIT ? OFFSET ?',
+                    (batch_size, offset)
+                )
+                rows = cursor.fetchall()
+            if not rows:
+                break
+            for row in rows:
+                yield (row[0], json.loads(row[1]))
+            if len(rows) < batch_size:
+                break
+            offset += len(rows)
+
+    def iter_values(self, batch_size: int = 2000) -> Iterator[Any]:
+        """Iterador com streaming paginado de valores decodificados."""
+        offset = 0
+        while True:
+            with self._lock:
+                cursor = self.conn.execute(
+                    f'SELECT value FROM "{self.table_name}" LIMIT ? OFFSET ?',
+                    (batch_size, offset)
+                )
+                rows = cursor.fetchall()
+            if not rows:
+                break
+            for row in rows:
+                yield json.loads(row[0])
+            if len(rows) < batch_size:
+                break
+            offset += len(rows)
+
     def keys(self) -> List[str]:
-        with self._lock:
-            cursor = self.conn.execute(f'SELECT key FROM "{self.table_name}"')
-            return [row[0] for row in cursor.fetchall()]
+        return list(self.iter_keys())
 
     def items(self) -> List[Tuple[str, Any]]:
-        with self._lock:
-            cursor = self.conn.execute(f'SELECT key, value FROM "{self.table_name}"')
-            return [(row[0], json.loads(row[1])) for row in cursor.fetchall()]
+        return list(self.iter_items())
 
     def values(self) -> List[Any]:
-        with self._lock:
-            cursor = self.conn.execute(f'SELECT value FROM "{self.table_name}"')
-            return [json.loads(row[0]) for row in cursor.fetchall()]
+        return list(self.iter_values())
 
     def __len__(self) -> int:
         with self._lock:
             cursor = self.conn.execute(f'SELECT COUNT(*) FROM "{self.table_name}"')
             return cursor.fetchone()[0]
 
-    def __iter__(self) -> Iterable[str]:
-        return iter(self.keys())
+    def __iter__(self) -> Iterator[str]:
+        return self.iter_keys()
 
     def vacuum(self) -> None:
         """Compacta o banco SQLite."""

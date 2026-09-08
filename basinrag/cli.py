@@ -1,15 +1,18 @@
 import argparse
 import sys
 import asyncio
+from basinrag import __version__
 from basinrag.factory import BasinRAG
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
+    sys.stdin.reconfigure(encoding="utf-8")
 except Exception:
     pass
 
 def main():
     parser = argparse.ArgumentParser(description="BasinRAG CLI")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command", help="Comandos disponíveis")
 
     # Ingest
@@ -74,7 +77,7 @@ def main():
         print("🤖 Chat BasinRAG Iniciado! (Digite 'sair' para encerrar)")
         
         async def chat_loop():
-            # LanÃ§a o daemon de L3 em background (nÃ£o bloqueia)
+            # Lança o daemon de L3 em background (não bloqueia)
             bg_task = asyncio.create_task(rag.start_background_summarizer())
             
             while True:

@@ -178,15 +178,18 @@ class BM25Index:
             return False
         with open(path, "r", encoding="utf-8") as f:
             payload = json.load(f)
-        self.doc_ids = payload["doc_ids"]
-        self.doc_len = payload["doc_len"]
-        self.avgdl = float(payload["avgdl"])
-        self.n = int(payload["n"])
-        self.df = {k: int(v) for k, v in payload["df"].items()}
+        self.doc_ids = payload.pop("doc_ids")
+        self.doc_len = payload.pop("doc_len")
+        self.avgdl = float(payload.pop("avgdl"))
+        self.n = int(payload.pop("n"))
+        self.df = {k: int(v) for k, v in payload.pop("df").items()}
+        raw_postings = payload.pop("postings")
         self.postings = {
             t: [(int(i), int(tf)) for i, tf in pairs]
-            for t, pairs in payload["postings"].items()
+            for t, pairs in raw_postings.items()
         }
+        del raw_postings
         self.build_id = payload.get("buildId", "") or ""
         self.corpus_lang = payload.get("corpus_lang", "pt")
+        del payload
         return True

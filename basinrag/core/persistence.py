@@ -61,12 +61,8 @@ def safe_replace_dir(src_dir: str, dst_dir: str, retries: int = 5, delay: float 
             break
         except OSError:
             if attempt == retries - 1:
-                # Fallback: cópia arquivo a arquivo com substituição
-                for fname in os.listdir(src_dir):
-                    s_file = os.path.join(src_dir, fname)
-                    d_file = os.path.join(dst_dir, fname)
-                    if os.path.isfile(s_file):
-                        shutil.copy2(s_file, d_file)
+                # Fallback: cópia recursiva preservando pastas
+                shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
                 shutil.rmtree(src_dir, ignore_errors=True)
                 return
             time.sleep(delay * (2 ** attempt))
@@ -160,15 +156,8 @@ class BasinPersistence:
             if getattr(engine, "bm25", None) is not None:
                 engine.bm25.save(os.path.join(tmp, "bm25.json"), build_id=build_id)
 
-            os.makedirs(self.storage_dir, exist_ok=True)
-            for name in ("embeddings.npz", "node_ids.json", "graph.json", "meta.json", "bm25.json", "successor.db", "attractor.db"):
-                src = os.path.join(tmp, name)
-                if os.path.exists(src):
-                    os.replace(src, os.path.join(self.storage_dir, name))
-
-            safe_replace_dir(basins_tmp, self.basins_dir)
-
-            shutil.rmtree(tmp, ignore_errors=True)
+            # Substituição atômica de todo o diretório para garantir integridade
+            safe_replace_dir(tmp, self.storage_dir)
             return True
         except (IOError, OSError):
             logger.exception("Erro de I/O ao salvar")
@@ -196,14 +185,14 @@ class BasinPersistence:
             if os.path.exists(ids_path):
                 with open(ids_path, "r", encoding="utf-8") as f:
                     node_ids_list = json.load(f)
-                data = np.load(emb_path, allow_pickle=False)
-                for nid, vec in zip(node_ids_list, data["vectors"]):
-                    emb_map[str(nid)] = vec
+                with np.load(emb_path, allow_pickle=False) as data:
+                    for nid, vec in zip(node_ids_list, data["vectors"]):
+                        emb_map[str(nid)] = vec
             else:
                 # Fallback for legacy format (pre-migration)
-                data = np.load(emb_path, allow_pickle=True)
-                for nid, vec in zip(data["ids"], data["vectors"]):
-                    emb_map[str(nid)] = vec
+                with np.load(emb_path, allow_pickle=False) as data:
+                    for nid, vec in zip(data["ids"], data["vectors"]):
+                        emb_map[str(nid)] = vec
 
             with open(graph_path, "r", encoding="utf-8") as f:
                 graph_data = json.load(f)

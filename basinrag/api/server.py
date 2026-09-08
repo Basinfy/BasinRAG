@@ -47,9 +47,12 @@ async def lifespan(app: FastAPI):
     finally:
         bg_task.cancel()
         try:
-            await asyncio.gather(bg_task, return_exceptions=True)
-        except Exception:
-            pass
+            results = await asyncio.gather(bg_task, return_exceptions=True)
+            for res in results:
+                if isinstance(res, Exception) and not isinstance(res, asyncio.CancelledError):
+                    logger.error(f"Erro na task de background summarizer: {res}")
+        except Exception as e:
+            logger.error(f"Erro inesperado no encerramento da task de background: {e}")
         if _rag_instance:
             _rag_instance.persistence.save_topology(_rag_instance.engine)
         _rag_instance = None
@@ -65,7 +68,7 @@ cors_origins = [o.strip() for o in os.environ.get("BASINRAG_CORS_ORIGINS", "*").
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_credentials=True,
+    allow_credentials=(cors_origins != ["*"]),
     allow_methods=["*"],
     allow_headers=["*"],
 )

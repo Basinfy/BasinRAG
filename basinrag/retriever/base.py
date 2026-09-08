@@ -90,15 +90,27 @@ class BasinRAGRetriever(BaseRetriever):
 
         rerankable = packet.texts_for_rerank()
         if rerankable and self._reranker:
+            # Build text→node_id mapping BEFORE reranking so we can realign
+            text_to_nid = {}
+            for i, nid in enumerate(packet.node_ids):
+                if i < len(packet.hubs):
+                    text_to_nid[packet.hubs[i]] = nid
+                elif i - len(packet.hubs) < len(packet.neighbors):
+                    text_to_nid[packet.neighbors[i - len(packet.hubs)]] = nid
             ordered = self._reranker.rerank(query, rerankable, top_k=self.top_k)
             hub_set = set(packet.hubs)
             packet.hubs = [t for t in ordered if t in hub_set]
             packet.neighbors = [t for t in ordered if t not in hub_set]
+            # Realign node_ids to match new text order
+            packet.node_ids = [
+                text_to_nid.get(t, "") for t in packet.hubs + packet.neighbors
+            ]
         elif rerankable:
             combined = rerankable[: self.top_k]
             hub_set = set(packet.hubs)
             packet.hubs = [t for t in combined if t in hub_set]
             packet.neighbors = [t for t in combined if t not in hub_set]
+            packet.node_ids = packet.node_ids[: len(packet.hubs) + len(packet.neighbors)]
         return packet
 
     def _fill_from_nodes(self, packet: BriefingPacket, nodes, seed_ids):

@@ -11,7 +11,10 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from fastapi import Request, Depends, Header
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.websockets import WebSocketDisconnect
 import os
+import secrets
 
 _rag_instance: BasinRAG | None = None
 
@@ -58,6 +61,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+cors_origins = [o.strip() for o in os.environ.get("BASINRAG_CORS_ORIGINS", "*").split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -65,8 +77,9 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 API_KEY = os.environ.get("BASINRAG_API_KEY")
 
 async def verify_api_key(x_api_key: str = Header(None)):
-    if API_KEY and x_api_key != API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+    if API_KEY:
+        if not x_api_key or not secrets.compare_digest(x_api_key, API_KEY):
+            raise HTTPException(status_code=401, detail="Invalid API key")
 
 
 @app.get("/")
@@ -90,9 +103,10 @@ async def query_endpoint(request: Request, body: QueryRequest):
 
 @app.websocket("/chat")
 async def websocket_chat(websocket: WebSocket, token: str = Query(None)):
-    if API_KEY and token != API_KEY:
-        await websocket.close(code=1008, reason="Unauthorized")
-        return
+    if API_KEY:
+        if not token or not secrets.compare_digest(token, API_KEY):
+            await websocket.close(code=1008, reason="Unauthorized")
+            return
     await websocket.accept()
     rag = _get_rag()
     try:
@@ -101,7 +115,10 @@ async def websocket_chat(websocket: WebSocket, token: str = Query(None)):
             async for token_chunk in rag.chat(data):
                 await websocket.send_text(token_chunk)
             await websocket.send_text("[DONE]")
+    except WebSocketDisconnect:
+        logger.info("WebSocket desconectado pelo cliente normalmente.")
     except asyncio.TimeoutError:
         await websocket.close(code=1000, reason="Timeout")
     except Exception:
         logger.exception("WebSocket desconectado com erro")
+

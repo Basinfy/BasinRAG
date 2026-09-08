@@ -131,11 +131,19 @@ class BasinPersistence:
             engine.build_id = build_id
             meta = {
                 "buildId": build_id,
-                "successor": dict(engine.successor.items()) if hasattr(engine.successor, 'items') else engine.successor,
-                "attractor_of": dict(engine.attractor_of.items()) if hasattr(engine.attractor_of, 'items') else engine.attractor_of,
                 "section_size": getattr(engine, "section_size", 20),
                 "encoder_model": getattr(engine, "encoder_model", ""),
             }
+            if hasattr(engine.successor, "backup_to"):
+                engine.successor.backup_to(os.path.join(tmp, "successor.db"))
+            else:
+                meta["successor"] = dict(engine.successor.items()) if hasattr(engine.successor, 'items') else engine.successor
+
+            if hasattr(engine.attractor_of, "backup_to"):
+                engine.attractor_of.backup_to(os.path.join(tmp, "attractor.db"))
+            else:
+                meta["attractor_of"] = dict(engine.attractor_of.items()) if hasattr(engine.attractor_of, 'items') else engine.attractor_of
+
             with open(os.path.join(tmp, "meta.json"), "w", encoding="utf-8") as f:
                 json.dump(meta, f)
 
@@ -153,7 +161,7 @@ class BasinPersistence:
                 engine.bm25.save(os.path.join(tmp, "bm25.json"), build_id=build_id)
 
             os.makedirs(self.storage_dir, exist_ok=True)
-            for name in ("embeddings.npz", "node_ids.json", "graph.json", "meta.json", "bm25.json"):
+            for name in ("embeddings.npz", "node_ids.json", "graph.json", "meta.json", "bm25.json", "successor.db", "attractor.db"):
                 src = os.path.join(tmp, name)
                 if os.path.exists(src):
                     os.replace(src, os.path.join(self.storage_dir, name))
@@ -216,6 +224,17 @@ class BasinPersistence:
             if os.path.exists(meta_path):
                 with open(meta_path, "r", encoding="utf-8") as f:
                     meta = json.load(f)
+                engine.section_size = meta.get("section_size", 20)
+                engine.encoder_model = meta.get("encoder_model", "")
+                meta_build_id = meta.get("buildId", "") or ""
+            else:
+                meta = {}
+                engine.encoder_model = ""
+
+            succ_db_path = os.path.join(self.storage_dir, "successor.db")
+            if os.path.exists(succ_db_path) and hasattr(engine.successor, "restore_from"):
+                engine.successor.restore_from(succ_db_path)
+            elif "successor" in meta:
                 succ_data = meta.get("successor", {})
                 if hasattr(engine.successor, "clear"):
                     engine.successor.clear()
@@ -224,7 +243,16 @@ class BasinPersistence:
                 else:
                     for k, v in succ_data.items():
                         engine.successor[k] = v if v is not None else None
+            else:
+                if hasattr(engine.successor, "clear"):
+                    engine.successor.clear()
+                else:
+                    engine.successor = {}
 
+            attr_db_path = os.path.join(self.storage_dir, "attractor.db")
+            if os.path.exists(attr_db_path) and hasattr(engine.attractor_of, "restore_from"):
+                engine.attractor_of.restore_from(attr_db_path)
+            elif "attractor_of" in meta:
                 attr_data = meta.get("attractor_of", {})
                 if hasattr(engine.attractor_of, "clear"):
                     engine.attractor_of.clear()
@@ -233,19 +261,12 @@ class BasinPersistence:
                 else:
                     for k, v in attr_data.items():
                         engine.attractor_of[k] = v
-                engine.section_size = meta.get("section_size", 20)
-                engine.encoder_model = meta.get("encoder_model", "")
-                meta_build_id = meta.get("buildId", "") or ""
             else:
-                if hasattr(engine.successor, "clear"):
-                    engine.successor.clear()
-                else:
-                    engine.successor = {}
                 if hasattr(engine.attractor_of, "clear"):
                     engine.attractor_of.clear()
                 else:
                     engine.attractor_of = {}
-                engine.encoder_model = ""
+
             engine.build_id = meta_build_id
 
             from .topology import TopologicalBasin

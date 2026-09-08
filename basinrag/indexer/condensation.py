@@ -10,8 +10,11 @@ from ..core.ids import tokenize
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
 
 
+from ..indexer.bm25 import _STOP
+
+
 def extract_l1(text: str, top_n: int = 8) -> str:
-    counts = Counter(t for t in tokenize(text) if len(t) > 3)
+    counts = Counter(t for t in tokenize(text) if len(t) > 3 and t not in _STOP)
     return ", ".join(w for w, _ in counts.most_common(top_n))
 
 

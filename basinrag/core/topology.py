@@ -141,8 +141,11 @@ class BasinTopologyEngine:
             by_source, emb_map,
             fallback_section_size=self.section_size,
         )
-        for k, v in successor_dict.items():
-            self.successor[k] = v
+        if hasattr(self.successor, "set_many"):
+            self.successor.set_many(successor_dict)
+        else:
+            for k, v in successor_dict.items():
+                self.successor[k] = v
 
     def partition_into_basins(self, preserve_l3: Optional[Dict[str, Dict[str, Any]]] = None):
         """Partition along Ï† (sequential successor), not PageRank."""
@@ -161,18 +164,25 @@ class BasinTopologyEngine:
             for src, pairs in indexed.items():
                 by_source[src] = [nid for _, nid in sorted(pairs)]
             succ_dict = sequential_successor(by_source, self.section_size)
-            for k, v in succ_dict.items():
-                self.successor[k] = v
+            if hasattr(self.successor, "set_many"):
+                self.successor.set_many(succ_dict)
+            else:
+                for k, v in succ_dict.items():
+                    self.successor[k] = v
 
-        attr_dict = detect_attractors(self.successor)
-        for k, v in attr_dict.items():
-            self.attractor_of[k] = v
-        hops = reverse_hops(self.successor, self.attractor_of)
-        groups = members_by_attractor(self.attractor_of)
+        succ_map = dict(self.successor.items()) if hasattr(self.successor, "items") else dict(self.successor)
+        attr_dict = detect_attractors(succ_map)
+        if hasattr(self.attractor_of, "set_many"):
+            self.attractor_of.set_many(attr_dict)
+        else:
+            for k, v in attr_dict.items():
+                self.attractor_of[k] = v
+        hops = reverse_hops(succ_map, attr_dict)
+        groups = members_by_attractor(attr_dict)
         preserve_l3 = preserve_l3 or {}
 
         for nid, data in self.graph.nodes(data=True):
-            attr = self.attractor_of.get(nid, nid)
+            attr = attr_dict.get(nid, nid)
             data["basin_id"] = attr
             data["hops"] = hops.get(nid, 0)
 
@@ -194,7 +204,7 @@ class BasinTopologyEngine:
                 valid_members.append(nid)
                 basin.add_node(nid, hop, dict(self.graph.nodes[nid]))
                 
-            for parent, child in rho_parent_child(self.successor, valid_members):
+            for parent, child in rho_parent_child(succ_map, valid_members):
                 basin.rho_tree.add_edge(parent, child)
             basin.cohesion = self._cohesion(valid_members)
             if basin.rho_tree.has_node(attr):

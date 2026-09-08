@@ -5,6 +5,9 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 from ..core.topology import BasinTopologyEngine
 from ..core.llm import UniversalLLM
+from ..logging_config import setup_logging
+
+logger = setup_logging()
 
 
 class BasinSummarySchema(BaseModel):

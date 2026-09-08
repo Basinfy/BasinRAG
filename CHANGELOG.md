@@ -2,6 +2,47 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.0] - 2026-09-06
+
+### Fixed & Hardened (Auditoria Especializada de RAG)
+- **CRITICAL-01 (Sincronização de IDs no Re-ranking Cross-Encoder)**:
+  - Corrigido desalinhamento crítico em `basinrag.retriever.base.BasinRAGRetriever`: `packet.node_ids` agora é estritamente mapeado e sincronizado com a ordem reordenada pelo Cross-Encoder, prevenindo corrupção de metadados e citações errôneas.
+- **CRITICAL-02 (Eliminação de OOM e Streaming SQLite no DiskKVStore)**:
+  - Substituída a serialização redundante do banco de dados SQLite inteiro dentro do `meta.json` pelo utilitário transacional nativo de streaming `sqlite3.Connection.backup` em `basinrag.core.kv_store.DiskKVStore` e `persistence.py`.
+- **CRITICAL-03 (Tratamento de Exceções no Summarizer)**:
+  - Corrigido import ausente de `logger` no bloco `except Exception` de `basinrag.indexer.summarizer.AgenticSummarizer`.
+- **HIGH-01 (Suporte Linguístico PT/EN Bilíngue no BM25)**:
+  - Implementada detecção automática de idioma do documento (`detect_language`) em `basinrag.indexer.bm25` e `projector.py`. O `BM25Index` agora aplica o `RSLPStemmer` (PT) ou `SnowballStemmer` (EN) consistentemente entre indexação e consulta.
+- **HIGH-02 (Normalização L2 de Centroides no Roteador)**:
+  - Adicionada normalização vetorial $L2$ explícita em `basinrag.retriever.router.IntelligentQueryRouter.train_centroids` para garantir distâncias euclidianas e cosseno matematicamente válidas.
+- **HIGH-03 (Normalização Relativa no Decaimento Espectral PPR)**:
+  - Substituído o min-max scaling frágil por normalização relativa ao escore máximo ($score / max\_score$) em `basinrag.retriever.local_search.TopologicalLocalSearch`, evitando divisão por zero quando todos os nós têm escores uniformes.
+- **HIGH-04 (Otimização Bulk em Particionamento Topológico)**:
+  - Substituídas $N$ chamadas individuais repetitivas de gravação por transação em lote `DiskKVStore.set_many()` em `basinrag.core.topology.TopologicalBasinEngine`.
+- **Segurança da API FastAPI**:
+  - Middleware de CORS configurável via variável de ambiente `BASINRAG_CORS_ORIGINS`.
+  - Comparação de chave de API protegida contra ataques de temporização (*timing attacks*) via `secrets.compare_digest`.
+  - Desconexão de WebSocket tratada de forma limpa via `WebSocketDisconnect`.
+
+### Benchmarks (Reavaliação Empírica Rigorosa)
+- **BEIR Oficial (SciFact — 50 queries padrão)**:
+  - NDCG@10 subiu para **0.771** (+142.5% vs GraphRAG 0.318).
+  - MRR@10 subiu para **0.750** (+217.8% vs GraphRAG 0.236).
+  - Tempo de indexação caiu para **90.80s** (3.05x mais rápido que GraphRAG 276.68s).
+  - Latência de busca por consulta caiu para **2.498,7ms** (4.43x mais rápido que GraphRAG 11.059,4ms).
+- **MTEB Hugging Face (SciFact — Bateria completa de 300 queries, k=1000)**:
+  - NDCG@10 alcançou **0.650** (+3.6% sobre v0.2.1 baseline).
+  - MRR@10 alcançou **0.629** (+9.1% sobre v0.2.1 baseline).
+  - MAP@10 alcançou **0.619** (+9.5% sobre v0.2.1 baseline).
+  - Hit@1 alcançou **57.0%** (documento correto no topo em 171 de 300 consultas).
+  - Recall@1000 atingiu **98.7%**.
+- **SWE-bench Lite (13 instâncias de repositórios reais)**:
+  - Hit@1 dobrou de 15.4% para **30.8%**.
+  - Hit@10 subiu de 76.9% para **84.6%**.
+  - MRR subiu de 0.369 para **0.434**.
+
+---
+
 ## [2.1.0] - 2026-09-06
 
 ### Added

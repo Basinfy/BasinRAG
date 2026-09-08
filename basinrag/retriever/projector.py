@@ -14,8 +14,9 @@ def seed_node_ids(engine, query: str, max_k: int = 6) -> List[str]:
 
     bm25 = getattr(engine, "bm25", None)
     if bm25 is not None and getattr(bm25, "n", 0) > 0 and hasattr(bm25, "postings"):
-        from ..indexer.bm25 import stem_token
-        stemmed_terms = [stem_token(t) for t in terms]
+        from ..indexer.bm25 import stem_token, detect_language
+        lang = detect_language(query)
+        stemmed_terms = [stem_token(t, lang=lang) for t in terms]
         doc_hits = {}
         for st in stemmed_terms:
             if st in bm25.postings:

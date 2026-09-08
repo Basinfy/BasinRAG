@@ -56,3 +56,34 @@ def test_api_key_enforcement(client):
         # With correct key -> 200
         r = client.post("/query", json={"query": "pergunta valida", "top_k": 5}, headers={"X-API-KEY": "secret123"})
         assert r.status_code == 200
+
+
+def test_cors_headers_present(client):
+    r = client.options("/", headers={"Origin": "http://localhost:3000", "Access-Control-Request-Method": "GET"})
+    assert r.status_code == 200
+    assert "access-control-allow-origin" in r.headers
+
+
+def test_websocket_chat_auth_and_disconnect(client, mock_rag):
+    async def fake_chat(data):
+        yield "token1 "
+        yield "token2"
+
+    mock_rag.chat = fake_chat
+
+    with patch("basinrag.api.server.API_KEY", "secret123"):
+        # Unauthorized without token
+        with pytest.raises(Exception):
+            with client.websocket_connect("/chat"):
+                pass
+
+        # Authorized with token
+        with client.websocket_connect("/chat?token=secret123") as ws:
+            ws.send_text("olá")
+            t1 = ws.receive_text()
+            t2 = ws.receive_text()
+            done = ws.receive_text()
+            assert t1 == "token1 "
+            assert t2 == "token2"
+            assert done == "[DONE]"
+

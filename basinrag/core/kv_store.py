@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import json
 import threading
@@ -140,4 +141,37 @@ class DiskKVStore:
 
     def __setitem__(self, key: str, value: Any) -> None:
         self.set(key, value)
+
+    def backup_to(self, dest_path: str) -> None:
+        """Create an atomic, streaming SQLite backup to dest_path without in-memory deserialization."""
+        dest_abs = os.path.abspath(dest_path)
+        src_abs = os.path.abspath(self.db_path)
+        if dest_abs == src_abs:
+            return
+        os.makedirs(os.path.dirname(dest_abs), exist_ok=True)
+        with self._lock:
+            try:
+                self.conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            except Exception:
+                pass
+            dest_conn = sqlite3.connect(dest_path)
+            try:
+                self.conn.backup(dest_conn)
+            finally:
+                dest_conn.close()
+
+    def restore_from(self, src_path: str) -> None:
+        """Restore database contents from another SQLite database file using streaming backup."""
+        if not os.path.exists(src_path):
+            return
+        src_abs = os.path.abspath(src_path)
+        dest_abs = os.path.abspath(self.db_path)
+        if src_abs == dest_abs:
+            return
+        with self._lock:
+            src_conn = sqlite3.connect(src_path)
+            try:
+                src_conn.backup(self.conn)
+            finally:
+                src_conn.close()
 

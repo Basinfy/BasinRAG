@@ -500,3 +500,90 @@ def test_meta_basins_generation():
     meta = build_meta_basins(engine, similarity_threshold=0.5)
     assert isinstance(meta, dict)
 
+
+def test_disk_kv_store_streaming_backup_and_restore(tmp_path):
+    from basinrag.core.kv_store import DiskKVStore
+    src_db = str(tmp_path / "src.db")
+    dst_db = str(tmp_path / "dst.db")
+
+    kv1 = DiskKVStore(src_db, "test_table")
+    kv1.set_many({"key1": "val1", "key2": {"nested": 123}, "key3": [1, 2, 3]})
+    assert len(kv1) == 3
+
+    # Backup to dst_db
+    kv1.backup_to(dst_db)
+    kv1.close()
+
+    # Open dst_db and verify
+    kv2 = DiskKVStore(dst_db, "test_table")
+    assert len(kv2) == 3
+    assert kv2.get("key1") == "val1"
+    assert kv2.get("key2") == {"nested": 123}
+
+    # Restore from dst_db into a fresh kv3
+    kv3_path = str(tmp_path / "kv3.db")
+    kv3 = DiskKVStore(kv3_path, "test_table")
+    assert len(kv3) == 0
+    kv3.restore_from(dst_db)
+    assert len(kv3) == 3
+    assert kv3.get("key3") == [1, 2, 3]
+    kv2.close()
+    kv3.close()
+
+
+def test_bm25_language_detection_and_portuguese_stemming():
+    from basinrag.indexer.bm25 import detect_language, stem_token, BM25Index
+
+    # Language detection
+    assert detect_language("O desenvolvimento dos computadores e sistemas modernos") == "pt"
+    assert detect_language("The development of computer and modern systems") == "en"
+    assert detect_language("Seção com acentuação específica") == "pt"
+
+    # Stemming Portuguese without accents
+    stem_pt = stem_token("computadores", lang="pt")
+    assert stem_pt == "comput"  # RSLPStemmer reduces computadores -> comput
+    stem_en = stem_token("computadores", lang="en")
+    assert stem_en != stem_pt
+
+    # Indexing and scoring in Portuguese
+    index = BM25Index()
+    docs = [
+        "O desenvolvimento de computadores avança rapidamente",
+        "A culinária tradicional brasileira usa muitos temperos",
+    ]
+    index.build(["d1", "d2"], docs)
+    scores = index.score("computador desenvolvido", top_k=2)
+    assert len(scores) > 0
+    assert scores[0][0] == "d1"
+
+
+def test_persistence_with_sqlite_db_files(tmp_path):
+    import json
+    chunks = [
+        _chunk("doc1.txt", 0, "conteudo sobre inteligência artificial", 0),
+        _chunk("doc1.txt", 1, "modelos de linguagem e redes neurais", 1),
+    ]
+    engine = BasinTopologyEngine(storage_dir=str(tmp_path / "engine_store"))
+    engine.build_graph(chunks)
+    engine.partition_into_basins()
+
+    persistence = BasinPersistence(str(tmp_path / "persist_store"))
+    assert persistence.save_topology(engine)
+
+    # Verify that successor.db exists in persistence dir
+    assert os.path.exists(tmp_path / "persist_store" / "successor.db")
+    assert os.path.exists(tmp_path / "persist_store" / "attractor.db")
+
+    # Verify that meta.json exists and does NOT leak the whole successor dict into RAM/JSON
+    with open(tmp_path / "persist_store" / "meta.json", "r", encoding="utf-8") as f:
+        meta_data = json.load(f)
+    assert "successor" not in meta_data
+    assert "attractor_of" not in meta_data
+
+    # Load into a new engine and verify successor is restored
+    other_engine = BasinTopologyEngine(storage_dir=str(tmp_path / "other_store"))
+    assert persistence.load_topology(other_engine)
+    assert len(other_engine.successor) > 0
+    assert len(other_engine.attractor_of) > 0
+
+

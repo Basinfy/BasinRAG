@@ -69,7 +69,10 @@ class BasinRAGBEIRAdapter:
     def search_beir(self, queries: Dict[str, str], top_k: int = 10, search_type: str = "hybrid") -> Dict[str, Dict[str, float]]:
         """Retorna formato oficial do BEIR: {qid: {doc_id: score}}."""
         results = {}
-        for qid, qtext in queries.items():
+        total = len(queries)
+        for i, (qid, qtext) in enumerate(queries.items(), 1):
+            if i % 5 == 0 or i == 1 or i == total:
+                print(f"[BasinRAG BEIR] Processando query {i}/{total} ({i/total*100:.0f}%)...", flush=True)
             docs = self.rag.query(qtext, search_type=search_type, top_k=top_k * 2)
             retrieved_scores = {}
             for rank, d in enumerate(docs):

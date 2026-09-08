@@ -82,7 +82,9 @@ class IntelligentQueryRouter:
         g_embs = encoder.encode(global_examples, normalize_embeddings=True)
         h_embs = encoder.encode(hybrid_examples, normalize_embeddings=True)
         cls._global_centroid = np.mean(g_embs, axis=0)
+        cls._global_centroid /= np.linalg.norm(cls._global_centroid) + 1e-10
         cls._hybrid_centroid = np.mean(h_embs, axis=0)
+        cls._hybrid_centroid /= np.linalg.norm(cls._hybrid_centroid) + 1e-10
 
     @classmethod
     def route_with_embeddings(cls, query: str) -> str:

@@ -153,9 +153,9 @@ class TopologicalLocalSearch:
                 break
 
         max_v = max(p.values()) if p else 1.0
-        min_v = min(p.values()) if p else 0.0
-        rng = (max_v - min_v) if (max_v - min_v) > 1e-6 else 1.0
-        return {nid: float((p[nid] - min_v) / rng) for nid in nodes}
+        if max_v < 1e-9:
+            max_v = 1.0
+        return {nid: float(p[nid] / max_v) for nid in nodes}
 
     def search_nodes(
         self,

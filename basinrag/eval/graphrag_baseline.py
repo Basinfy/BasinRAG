@@ -66,7 +66,10 @@ class GraphRAGBaseline:
         self.entity_df.clear()
         self.N = len(corpus)
 
-        for docid, text in corpus.items():
+        total = len(corpus)
+        for idx, (docid, text) in enumerate(corpus.items(), 1):
+            if idx % 1000 == 0 or idx == 1 or idx == total:
+                print(f"[GraphRAG Build] Indexando documento {idx}/{total} ({idx/total*100:.0f}%)...", flush=True)
             entities = self._extract_entities(text)
             for e in entities:
                 self.entity_to_docs[e].add(docid)
@@ -97,6 +100,9 @@ class GraphRAGBaseline:
                 for docid in self.entity_to_docs.get(qe, set()):
                     direct_docs[docid] += weight
 
+        if not direct_docs:
+            return []
+
         doc_scores = defaultdict(float, direct_docs)
 
         # 2-Hop: Propagação de ativação sobre o grafo de co-ocorrência de entidades
@@ -117,7 +123,10 @@ class GraphRAGBaseline:
     def search_beir(self, queries: Dict[str, str], top_k: int = 10) -> Dict[str, Dict[str, float]]:
         """Retorna formato oficial do BEIR: {qid: {doc_id: score}}."""
         results = {}
-        for qid, qtext in queries.items():
+        total = len(queries)
+        for idx, (qid, qtext) in enumerate(queries.items(), 1):
+            if idx % 5 == 0 or idx == 1 or idx == total:
+                print(f"[GraphRAG BEIR] Processando query {idx}/{total} ({idx/total*100:.0f}%)...", flush=True)
             ranked = self.search_single(qtext, top_k=top_k)
             results[qid] = {docid: float(score) for docid, score in ranked}
         return results

@@ -48,6 +48,7 @@ class BasinTopologyEngine:
         self.successor = DiskKVStore(os.path.join(self.storage_dir, "successor.db"), "successor")
         self.attractor_of = DiskKVStore(os.path.join(self.storage_dir, "attractor.db"), "attractor_of")
         
+        self.meta_basins: Dict[str, Any] = {}
         self.section_size = section_size
         self.max_hops = max_hops
         self.bm25 = None
@@ -65,12 +66,19 @@ class BasinTopologyEngine:
     def reset(self) -> None:
         self.graph.clear()
         self.basins = {}
+        self.meta_basins = {}
         if hasattr(self, 'successor') and hasattr(self.successor, 'clear'):
             self.successor.clear()
         if hasattr(self, 'attractor_of') and hasattr(self.attractor_of, 'clear'):
             self.attractor_of.clear()
         self.bm25 = None
         self.build_id = ""
+
+    def build_meta_basins(self, similarity_threshold: float = 0.70) -> None:
+        """Constrói Meta-Bacias Nível 2 conectando atratores entre múltiplos documentos."""
+        from ..retriever.meta_basins import build_meta_basins
+        self.meta_basins = build_meta_basins(self, similarity_threshold=similarity_threshold)
+
 
     def build_graph(self, chunks: List[Dict[str, Any]]):
         """Rebuild from chunks. Always clears first so re-ingest cannot append."""
@@ -123,11 +131,9 @@ class BasinTopologyEngine:
                     n2_id = nodes[neighbor_idx][0]
                     if n1_id == n2_id or self.graph.has_edge(n1_id, n2_id):
                         continue
-                    e1 = np.array(nodes[i][1]["embedding"], dtype=np.float32)
-                    e2 = np.array(nodes[neighbor_idx][1]["embedding"], dtype=np.float32)
-                    sim = self.cosine_similarity(e1, e2)
+                    sim = float(_D[i][j])
                     if sim > 0.85:
-                        self.graph.add_edge(n1_id, n2_id, weight=float(sim), type="virtual-edge")
+                        self.graph.add_edge(n1_id, n2_id, weight=sim, type="virtual-edge")
 
         emb_map = {nid: data["embedding"] for nid, data in self.graph.nodes(data=True)
                    if "embedding" in data}
@@ -182,13 +188,9 @@ class BasinTopologyEngine:
             valid_members = []
             for nid in valid_members_for_src:
                 hop = hops.get(nid, 0)
-                if not compute_trapping_bounds(hop, max_hops=self.max_hops):
-                    # Remove peripheral node outside trapping bound
-                    if self.graph.has_node(nid):
-                        self.graph.remove_node(nid)
-                    self.successor.pop(nid, None)
-                    self.attractor_of.pop(nid, None)
-                    continue
+                is_trapped = compute_trapping_bounds(hop, max_hops=self.max_hops)
+                self.graph.nodes[nid]["hops"] = hop
+                self.graph.nodes[nid]["is_peripheral"] = not is_trapped
                 valid_members.append(nid)
                 basin.add_node(nid, hop, dict(self.graph.nodes[nid]))
                 

@@ -79,6 +79,7 @@ class BasinIngestor:
         for i, (txt, emb) in enumerate(zip(texts, embeddings)):
             layers = node_layers(txt)
             meta = (metadata_list[i] if metadata_list else {}) or {}
+            meta["doc_id"] = meta.get("doc_id") or source
             nodes.append({
                 "id": make_node_id(source, i, txt),
                 "text": txt,
@@ -109,9 +110,20 @@ class BasinIngestor:
         ext = os.path.splitext(filepath)[1].lower()
         if ext in _PDF_EXTS:
             loader = PyPDFLoader(filepath)
+            docs = loader.load()
         else:
-            loader = TextLoader(filepath, encoding="utf-8")
-        docs = loader.load()
+            docs = None
+            for enc in ("utf-8", "utf-8-sig", "latin-1"):
+                try:
+                    loader = TextLoader(filepath, encoding=enc)
+                    docs = loader.load()
+                    break
+                except Exception:
+                    continue
+            if docs is None:
+                loader = TextLoader(filepath, autodetect_encoding=True)
+                docs = loader.load()
+
         chunks = self.splitter.split_documents(docs)
         texts = []
         metadata_list = []
@@ -159,7 +171,8 @@ class BasinIngestor:
             return []
 
         all_nodes: List[Dict[str, Any]] = []
-        for root, dirs, files in os.walk(dir_path, followlinks=True):
+        for root, dirs, files in os.walk(dir_path, followlinks=False):
+
             dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and not d.startswith(".")]
             for filename in files:
                 filepath = os.path.join(root, filename)

@@ -1,6 +1,6 @@
 """CSR-style BM25 (Robertson/Sparck Jones) with optional disk persistence.
 
-k1=1.2, b=0.75 — same knobs as Basinfy's bm25-indexer.
+Calibrated hyperparameters: k1=1.2, b=0.75.
 """
 from __future__ import annotations
 
@@ -31,28 +31,33 @@ def _get_stemmers():
         try:
             import nltk
             from nltk.stem import RSLPStemmer, SnowballStemmer
-            nltk.download("rslp", quiet=True)
+            try:
+                nltk.download("rslp", quiet=True)
+            except Exception:
+                pass
             _stemmer_pt = RSLPStemmer()
             _stemmer_en = SnowballStemmer("english")
-        except ImportError:
-            _stemmer_pt = False  # Mark as unavailable
+        except Exception:
+            _stemmer_pt = False
+            _stemmer_en = False
     return _stemmer_pt, _stemmer_en
 
 
 def stem_token(tok: str) -> str:
     pt, en = _get_stemmers()
-    if not pt:
-        return tok
+    if not pt or not en:
+        return tok.lower()
+    if len(tok) <= 3:
+        return tok.lower()
     import unicodedata
     has_accent = any(
         unicodedata.category(c) == "Mn"
         for c in unicodedata.normalize("NFD", tok)
     )
     if has_accent:
-        return pt.stem(tok)
-    stemmed_en = en.stem(tok)
-    stemmed_pt = pt.stem(tok)
-    return min(stemmed_en, stemmed_pt, key=len)
+        return pt.stem(tok.lower())
+    return en.stem(tok.lower())
+
 
 
 class BM25Index:

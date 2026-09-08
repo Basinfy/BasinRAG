@@ -10,14 +10,14 @@ except Exception:
 
 def main():
     parser = argparse.ArgumentParser(description="BasinRAG CLI")
-    subparsers = parser.add_subparsers(dest="command", help="Comandos disponÃ­veis")
+    subparsers = parser.add_subparsers(dest="command", help="Comandos disponíveis")
 
     # Ingest
     ingest_parser = subparsers.add_parser("ingest", help="Ingerir documentos")
-    ingest_parser.add_argument("path", type=str, help="Caminho do arquivo ou diretÃ³rio")
+    ingest_parser.add_argument("path", type=str, help="Caminho do arquivo ou diretório")
     
     # Query
-    query_parser = subparsers.add_parser("query", help="Fazer uma busca topolÃ³gica")
+    query_parser = subparsers.add_parser("query", help="Fazer uma busca topológica")
     query_parser.add_argument("question", type=str, help="Sua pergunta")
     query_parser.add_argument("--type", type=str, default="auto", choices=["auto", "local", "global", "hybrid"], help="Tipo de busca")
     query_parser.add_argument("--top-k", dest="top_k", type=int, default=5, help="Numero de passagens")
@@ -46,7 +46,11 @@ def main():
     if args.command == "ingest":
         print(f"Ingerindo {args.path}...")
         n = rag.ingest(args.path)
-        print(f"âœ… IngestÃ£o completa. {n} nÃ³s criados.")
+        if n == 0:
+            print(f"❌ Nenhum nó gerado a partir de {args.path}. Verifique o caminho e os arquivos.")
+            sys.exit(1)
+        print(f"✅ Ingestão completa. {n} nós criados.")
+
         
     elif args.command == "query":
         if not rag._loaded:

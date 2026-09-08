@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "BasinRAG: High-Performance Topological Retrieval-Augmented Generation via Dynamical Basins"
+authors:
+  - family-names: "Martins"
+    given-names: "Alex"
+version: 0.2.1
+date-released: 2026-09-06
+repository-code: "https://github.com/alexmart1ns/BasinRAG"
+keywords:
+  - "rag"
+  - "topological-data-analysis"
+  - "information-retrieval"
+  - "functional-graphs"
+  - "graph-rag"
+  - "vector-search"
+license: MIT

@@ -62,21 +62,84 @@ def load_beir_dataset(dataset_dir: str, split: str = "test") -> Tuple[Dict, Dict
     return corpus, queries, qrels
 
 class BasinRAGBEIRAdapter:
-    """Adaptador para encapsular o BasinRAG em uma API similar ao BEIR para testes imparciais."""
+    """Adaptador para encapsular o BasinRAG na API oficial do BEIR."""
     def __init__(self, rag_instance):
         self.rag = rag_instance
-        
+
+    def search_beir(self, queries: Dict[str, str], top_k: int = 10, search_type: str = "hybrid") -> Dict[str, Dict[str, float]]:
+        """Retorna formato oficial do BEIR: {qid: {doc_id: score}}."""
+        results = {}
+        for qid, qtext in queries.items():
+            docs = self.rag.query(qtext, search_type=search_type, top_k=top_k * 2)
+            retrieved_scores = {}
+            for rank, d in enumerate(docs):
+                meta = getattr(d, "metadata", {}) or {}
+                found_id = meta.get("doc_id") or meta.get("source") or meta.get("node_id") or ""
+                if found_id and found_id not in retrieved_scores:
+                    # Score decrescente calibrado por rank se score não estiver disponível
+                    score = float(getattr(d, "score", 0.0) or (1.0 / (rank + 1)))
+                    retrieved_scores[found_id] = score
+                if len(retrieved_scores) >= top_k:
+                    break
+            results[qid] = retrieved_scores
+        return results
+
     def search(self, queries: Dict[str, str], corpus: Dict[str, str], search_type: str = "hybrid", top_k: int = 10) -> Dict[str, List[str]]:
         results = {}
-        # Invert corpus for fast lookup by text
-        text_to_id = {text: docid for docid, text in corpus.items()}
         for qid, qtext in queries.items():
-            docs = self.rag.query(qtext, search_type=search_type, top_k=top_k)
-            # Retorna os IDs baseados no texto ( BasinRAG descarta IDs na saída )
+            docs = self.rag.query(qtext, search_type=search_type, top_k=top_k * 2)
             retrieved_ids = []
+            seen_docs = set()
             for d in docs:
-                found_id = text_to_id.get(d.page_content, "")
-                if found_id:
+                meta = getattr(d, "metadata", {}) or {}
+                found_id = meta.get("doc_id") or meta.get("source") or meta.get("node_id") or ""
+                if found_id and found_id in corpus and found_id not in seen_docs:
+                    seen_docs.add(found_id)
                     retrieved_ids.append(found_id)
+                if len(retrieved_ids) >= top_k:
+                    break
             results[qid] = retrieved_ids
         return results
+
+
+def ingest_beir_corpus(rag, corpus: Dict[str, str], batch_size: int = 128) -> int:
+    """Ingere um corpus arbitrário do BEIR diretamente no grafo e bacias topológicas do BasinRAG."""
+    from ..indexer.condensation import node_layers
+
+    doc_ids = list(corpus.keys())
+    texts = [corpus[doc_id] for doc_id in doc_ids]
+
+    if not texts:
+        return 0
+
+    embeddings = rag.ingestor.encoder.encode(
+        texts,
+        batch_size=batch_size,
+        normalize_embeddings=True,
+        show_progress_bar=True,
+    )
+
+    nodes = []
+    for doc_id, text, emb in zip(doc_ids, texts, embeddings):
+        layers = node_layers(text)
+        nodes.append({
+            "id": doc_id,
+            "text": text,
+            "embedding": emb,
+            "source": doc_id,
+            "chunk_index": 0,
+            "l1": layers["l1"],
+            "l2": layers["l2"],
+            "metadata": {"doc_id": doc_id},
+        })
+
+    rag.engine.encoder_model = rag.config.encoder_model
+    rag.engine.build_graph(nodes)
+    rag.engine.partition_into_basins()
+    rag.engine.build_meta_basins()
+    rag._attach_bm25()
+    rag.retriever = None
+
+    return len(nodes)
+
+

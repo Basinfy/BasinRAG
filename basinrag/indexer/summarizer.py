@@ -1,7 +1,47 @@
 import asyncio
 import re
+import json
+from typing import List, Optional
+from pydantic import BaseModel, Field
 from ..core.topology import BasinTopologyEngine
 from ..core.llm import UniversalLLM
+
+
+class BasinSummarySchema(BaseModel):
+    title: str = Field(default="", description="Título curto e descritivo da bacia temática")
+    themes: List[str] = Field(default_factory=list, description="Lista de tópicos-chave")
+    entities: List[str] = Field(default_factory=list, description="Entidades nomeadas mencionadas")
+    summary: str = Field(default="", description="Resumo conciso de 2-3 frases")
+
+
+class BasinCritiqueSchema(BaseModel):
+    critique: str = Field(default="", description="Análise crítica sobre precisão e ausência de alucinações")
+    score: int = Field(default=5, ge=1, le=10, description="Nota de qualidade de 1 a 10")
+
+
+def extract_json_payload(raw_text: str) -> Optional[dict]:
+    """Extrator de JSON resiliente em 3 estágios para LLMs locais."""
+    if not raw_text:
+        return None
+    try:
+        return json.loads(raw_text.strip())
+    except Exception:
+        pass
+    match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', raw_text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except Exception:
+            pass
+    first_brace = raw_text.find('{')
+    last_brace = raw_text.rfind('}')
+    if first_brace != -1 and last_brace > first_brace:
+        try:
+            return json.loads(raw_text[first_brace:last_brace + 1])
+        except Exception:
+            pass
+    return None
+
 
 class BasinSummarizer:
     """Gerador de resumos L3 Agentic com loop de Refinamento e Crítica."""
@@ -24,15 +64,21 @@ class BasinSummarizer:
         return self._llm
         
     def _extract_score(self, critique: str) -> int:
-        """Extrai o score (1-10) da crítica gerada pelo LLM."""
+        """Extrai o score (1-10) da crítica com suporte a JSON e regex."""
+        payload = extract_json_payload(critique)
+        if payload and isinstance(payload, dict) and "score" in payload:
+            try:
+                return min(10, max(1, int(payload["score"])))
+            except Exception:
+                pass
         matches = re.findall(r'SCORE:\s*(\d+)', critique, re.IGNORECASE)
         if matches:
-            return int(matches[-1])
-        # Fallback para qualquer número até 10 perto da palavra score
+            return min(10, max(1, int(matches[-1])))
         matches = re.findall(r'score.*?(\d+)', critique, re.IGNORECASE)
         if matches:
-            return min(10, int(matches[-1]))
-        return 5 # Default médio
+            return min(10, max(1, int(matches[-1])))
+        return 5
+
 
     async def _draft(self, texts: str) -> str:
         prompt = (

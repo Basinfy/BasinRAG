@@ -9,12 +9,14 @@ def mock_rag():
         mock_instance = MagicMock()
         mock_instance.config.model_name = "test-model"
         
-        # Mocking the query method
+        # Mocking query and aquery methods
         mock_doc = MagicMock()
         mock_doc.page_content = "resultado mockado"
         mock_instance.query.return_value = [mock_doc]
         from unittest.mock import AsyncMock
+        mock_instance.aquery = AsyncMock(return_value=[mock_doc])
         mock_instance.start_background_summarizer = AsyncMock()
+
         
         mock_create.return_value = mock_instance
         yield mock_instance

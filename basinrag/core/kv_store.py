@@ -1,94 +1,143 @@
 import sqlite3
 import json
-from typing import Any, Optional, Iterable
+import threading
+from typing import Any, Optional, Iterable, Dict, List, Tuple
 
 class DiskKVStore:
     """
-    A persistent Key-Value store backed by SQLite.
+    A thread-safe persistent Key-Value store backed by SQLite with WAL mode.
     Used to replace in-memory dicts for out-of-core graph scaling (OOM prevention).
     """
     def __init__(self, db_path: str, table_name: str = "kvstore"):
         self.db_path = db_path
-        self.table_name = table_name
-        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self.table_name = "".join(c for c in table_name if c.isalnum() or c == "_")
+        self._lock = threading.RLock()
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30.0)
         self._create_table()
 
     def _create_table(self):
-        with self.conn:
-            self.conn.execute(
-                f'''CREATE TABLE IF NOT EXISTS {self.table_name} (
-                    key TEXT PRIMARY KEY,
-                    value TEXT
-                )'''
-            )
-            # Optimize for high-speed writes and reads
-            self.conn.execute("PRAGMA synchronous = OFF")
-            self.conn.execute("PRAGMA journal_mode = WAL")
+        with self._lock:
+            with self.conn:
+                self.conn.execute("PRAGMA journal_mode = WAL")
+                self.conn.execute("PRAGMA synchronous = NORMAL")
+                self.conn.execute("PRAGMA busy_timeout = 10000")
+                self.conn.execute(
+                    f'''CREATE TABLE IF NOT EXISTS "{self.table_name}" (
+                        key TEXT PRIMARY KEY,
+                        value TEXT
+                    )'''
+                )
 
-    def set(self, key: str, value: Any):
-        val_str = json.dumps(value)
-        with self.conn:
-            self.conn.execute(
-                f"INSERT OR REPLACE INTO {self.table_name} (key, value) VALUES (?, ?)",
-                (key, val_str)
-            )
+    def set(self, key: str, value: Any) -> None:
+        val_str = json.dumps(value, ensure_ascii=False)
+        with self._lock:
+            with self.conn:
+                self.conn.execute(
+                    f'INSERT OR REPLACE INTO "{self.table_name}" (key, value) VALUES (?, ?)',
+                    (key, val_str)
+                )
+
+    def set_many(self, mapping: Dict[str, Any]) -> None:
+        """High-throughput atomic batch insert using a single transaction."""
+        if not mapping:
+            return
+        items = [(k, json.dumps(v, ensure_ascii=False)) for k, v in mapping.items()]
+        with self._lock:
+            with self.conn:
+                self.conn.executemany(
+                    f'INSERT OR REPLACE INTO "{self.table_name}" (key, value) VALUES (?, ?)',
+                    items
+                )
 
     def get(self, key: str, default: Any = None) -> Any:
-        cursor = self.conn.execute(f"SELECT value FROM {self.table_name} WHERE key = ?", (key,))
-        row = cursor.fetchone()
-        if row:
-            return json.loads(row[0])
-        return default
+        with self._lock:
+            cursor = self.conn.execute(
+                f'SELECT value FROM "{self.table_name}" WHERE key = ?',
+                (key,)
+            )
+            row = cursor.fetchone()
+            if row is not None:
+                return json.loads(row[0])
+            return default
 
     def pop(self, key: str, default: Any = None) -> Any:
-        val = self.get(key, default)
-        with self.conn:
-            self.conn.execute(f"DELETE FROM {self.table_name} WHERE key = ?", (key,))
-        return val
+        with self._lock:
+            cursor = self.conn.execute(
+                f'SELECT value FROM "{self.table_name}" WHERE key = ?',
+                (key,)
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return default
+            val = json.loads(row[0])
+            with self.conn:
+                self.conn.execute(
+                    f'DELETE FROM "{self.table_name}" WHERE key = ?',
+                    (key,)
+                )
+            return val
 
-    def keys(self) -> Iterable[str]:
-        cursor = self.conn.execute(f"SELECT key FROM {self.table_name}")
-        for row in cursor:
-            yield row[0]
+    def keys(self) -> List[str]:
+        with self._lock:
+            cursor = self.conn.execute(f'SELECT key FROM "{self.table_name}"')
+            return [row[0] for row in cursor.fetchall()]
 
-    def items(self) -> Iterable:
-        cursor = self.conn.execute(f"SELECT key, value FROM {self.table_name}")
-        for row in cursor:
-            yield row[0], json.loads(row[1])
+    def items(self) -> List[Tuple[str, Any]]:
+        with self._lock:
+            cursor = self.conn.execute(f'SELECT key, value FROM "{self.table_name}"')
+            return [(row[0], json.loads(row[1])) for row in cursor.fetchall()]
 
-    def values(self) -> Iterable[Any]:
-        cursor = self.conn.execute(f"SELECT value FROM {self.table_name}")
-        for row in cursor:
-            yield json.loads(row[0])
+    def values(self) -> List[Any]:
+        with self._lock:
+            cursor = self.conn.execute(f'SELECT value FROM "{self.table_name}"')
+            return [json.loads(row[0]) for row in cursor.fetchall()]
 
     def __len__(self) -> int:
-        cursor = self.conn.execute(f"SELECT COUNT(*) FROM {self.table_name}")
-        return cursor.fetchone()[0]
+        with self._lock:
+            cursor = self.conn.execute(f'SELECT COUNT(*) FROM "{self.table_name}"')
+            return cursor.fetchone()[0]
 
     def __iter__(self) -> Iterable[str]:
-        return self.keys()
+        return iter(self.keys())
 
     def vacuum(self) -> None:
         """Compacta o banco SQLite."""
-        self.conn.execute("VACUUM")
+        with self._lock:
+            self.conn.execute("VACUUM")
 
-    def clear(self):
-        with self.conn:
-            self.conn.execute(f"DELETE FROM {self.table_name}")
-        self.vacuum()
+    def clear(self) -> None:
+        with self._lock:
+            with self.conn:
+                self.conn.execute(f'DELETE FROM "{self.table_name}"')
+            self.vacuum()
 
-    def close(self):
-        self.conn.close()
+    def close(self) -> None:
+        with self._lock:
+            try:
+                self.conn.commit()
+            except Exception:
+                pass
+            self.conn.close()
 
     def __contains__(self, key: str) -> bool:
-        cursor = self.conn.execute(f"SELECT 1 FROM {self.table_name} WHERE key = ?", (key,))
-        return cursor.fetchone() is not None
+        with self._lock:
+            cursor = self.conn.execute(
+                f'SELECT 1 FROM "{self.table_name}" WHERE key = ?',
+                (key,)
+            )
+            return cursor.fetchone() is not None
 
     def __getitem__(self, key: str) -> Any:
-        val = self.get(key)
-        if val is None:
-            raise KeyError(key)
-        return val
+        with self._lock:
+            cursor = self.conn.execute(
+                f'SELECT value FROM "{self.table_name}" WHERE key = ?',
+                (key,)
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise KeyError(key)
+            return json.loads(row[0])
 
-    def __setitem__(self, key: str, value: Any):
+    def __setitem__(self, key: str, value: Any) -> None:
         self.set(key, value)
+

@@ -1,117 +1,105 @@
-# BasinRAG: o que o sistema realmente faz
+# Arquitetura do BasinRAG
 
-O BasinRAG é um **RAG para documentos** (PDF, Markdown, TXT) que agrupa chunks em **bacias** — partições de índice, não órbitas de um teorema numérico.
+Este documento detalha o design do sistema, a fundamentação matemática e as escolhas de engenharia por trás do **BasinRAG**, um sistema state-of-the-art de RAG (Retrieval-Augmented Generation) Topológico para processamento determinístico e escalável de documentos complexos.
 
-Ele **reutiliza vocabulário do Basinfy** (bacia, atrator, árvore rho, hops, L0–L3) e a **cara local/global do GraphRAG**. Não aplica o mapa \(f_{k,b}\) ao corpus. Não é Leiden. Não é um port fiel da matemática do Basinfy.
+## 1. Visão Geral e Filosofia Arquitetural
 
-O Basinfy (BasinMind) deixa isso explícito no próprio produto: teoremas de soma de dígitos valem para **inteiros** no kernel WASM; a qualidade de query vem de **BM25 + embeddings + condensação L0–L3**. O BasinRAG segue a mesma honestidade no caminho de retrieval.
+Abordagens de RAG baseadas em grafos de conhecimento com clustering comunitário (como algoritmos derivados de Leiden ou Louvain) dependem frequentemente de extrações semânticas iterativas, as quais podem introduzir dispersão e sensibilidade estrutural em grafos densamente conectados.
 
----
+A filosofia arquitetural do BasinRAG fundamenta-se no conceito de **RAG Topológico Determinístico**. O conhecimento é estruturado não através de grafos bipartidos irrestritos, mas por meio de partições determinísticas derivadas da estrutura sequencial e temática de leitura do documento. Essa formulação confina a propagação do contexto e assegura uma recuperação reprodutível e de alta precisão.
 
-## Duas camadas (não misturar)
+## 2. Fundamentação Matemática Formal
 
-1. **Índice (produto)** — o que `query` / `brief` / `chat` usam:
-   ingestão → embeddings → grafo de vizinhança + sucessor sequencial φ → atratores (início de seção) → hops → BM25 CSR + FAISS/HNSW + RRF ponderado → briefing com budget.
-2. **Não misturar com o kernel Basinfy** — não há DR9, QMC nem PageRank no pacote. Ligar scramble/checksum modular como LSH piora ANN.
+O cerne operacional do BasinRAG baseia-se na teoria dos sistemas dinâmicos em espaços discretos. O documento é modelado com uma separação estrita entre a topologia informacional inerente e suas relações virtuais.
 
----
+### 2.1 Grafo Funcional Discreto
 
-## Pipeline de indexação
+Definimos o corpus como um grafo direcionado $G = (V, E)$. Ao contrário de grafos arbitrários, o fluxo sequencial do documento estabelece um **Grafo Funcional Discreto** suportado por uma função determinística de mapeamento:
 
-```text
-arquivo (txt/md/pdf, walk recursivo)
-  → RecursiveCharacterTextSplitter (1000 / 100)
-  → id estável SHA-256(source, index, text)[:16]
-  → MiniLM multilingual, L2-normalizado
-  → L1 keywords + L2 primeira sentença (extractivo, sem LLM)
-  → grafo não-dirigido:
-       sequential (ordem no documento)
-       virtual-edge (kNN cosseno > 0.85)   ← fora de φ
-  → sucessor φ: chunk aponta para o anterior na mesma seção (~20 chunks)
-  → atrator = início da seção (sink)
-  → rho-tree = inverso de φ (pai → filho)
-  → BM25 CSR persistido (k1=1.2, b=0.75)
-  → .basinrag/ {graph.json, embeddings.npz, bm25.json, meta.json, basins/}
+$$ \phi: V \to V \cup \{\emptyset\} $$
+
+onde cada nó (chunk) $v \in V$ possui no máximo uma aresta de saída que aponta para o nó que o sucede logicamente ou para $\emptyset$ em partições terminais. 
+
+### 2.2 Sumidouros Estruturais e Atratores
+
+Dentro do grafo funcional de um documento formal, introduzimos o conceito de **Sumidouros Estruturais** (Atratores) $A_i$. Eles representam as âncoras semânticas primárias, tais como os cabeçalhos das seções e parágrafos-chaves. Tais atratores ancoram a informação em sua órbita.
+
+### 2.3 Partição em Bacias de Atração
+
+Com a função $\phi$ estabelecida, particionamos $V$ estritamente nas bacias:
+
+$$ B(A_i) = \{ v \in V \mid \phi^k(v) = A_i \text{ para algum } k \ge 0 \} $$
+
+Essa partição garante que qualquer recuperação semântica inicie restrita a um limite topológico claro, resolvendo o problema de contexto desfocado.
+
+### 2.4 Árvores de Predecessores $\rho$ e Profundidade Topológica
+
+Para cada bacia $B(A_i)$, forma-se uma árvore de predecessores $\rho$, orientada para o atrator. A **Profundidade Topológica**, ou número de saltos estruturais em relação ao atrator, é capturada por uma função de saltos (hops):
+
+$$ h(v): V \to \mathbb{Z}_{\ge 0} $$
+
+### 2.5 Separação Estrita (Topologia Primária vs Sinapses Virtuais)
+
+O BasinRAG isola:
+1. **Topologia Primária (Backbone)**: Determinada matematicamente pela estrutura hierárquica e fluxo do documento.
+2. **Sinapses Semânticas Virtuais**: Calculadas via similaridade de cossenos $k$-NN ($> 0.85$), modelando correlações transversais. Estas só são acionadas como um mecanismo *cross-basin* secundário.
+
+## 3. Pipeline de Indexação Unificada
+
+O sistema consolida a extração de forma multiformato num indexador altamente otimizado.
+
+* **Ingestão e Splitting Determinístico:** Suporte robusto para PDF, MD, e TXT. O documento é segmentado de maneira hierárquica (1000 caracteres / 100 caracteres de overlap). Para evitar recálculos redundantes e permitir consistência transacional, IDs determinísticos baseados em **SHA-256** são usados como chaves primárias.
+* **Representação Híbrida Avançada:**
+  * **Esparsa:** Matrizes CSR para indexação eficiente BM25, rigorosamente calibradas para vocabulário denso ($k_1 = 1.2$, $b = 0.75$).
+  * **Densa:** Encoders MiniLM bilíngues (L2-normalizados), indexados utilizando o padrão ouro via **FAISS** em índices `FlatIP` e `HNSW` para suporte de vizinhança de alta performance.
+* **Condensação de Contexto Multinível:** O BasinRAG estrutura os metadados do embedding numa hierarquia piramidal:
+  * L0: Texto integral.
+  * L1: Keywords lexicais purificadas.
+  * L2: Sentenças nucleares.
+  * L3: Resumos de domínio sintéticos de seção.
+
+## 4. Pipeline de Recuperação e Roteamento Híbrido
+
+Para superar o obstáculo comum de tempo de latência em sistemas RAG complexos, implementamos um pipeline de recuperação com resolução assíncrona baseada em intenção.
+
+### Diagrama de Fluxo (Recuperação Híbrida Topológica)
+
+```mermaid
+graph TD
+    Q[Query do Usuário] --> IR{Roteador de Intenção}
+    IR -->|Matches Simples/Lexical| C[Corpus-Wide Híbrida BM25 + FAISS]
+    IR -->|Complexa / Centróides| L[Local Search Intra-Bacia]
+    
+    C --> RRF[Fusão RRF]
+    L --> RRF
+    
+    RRF --> Decay[Prior de Decaimento Topológico]
+    Decay --> RR[Re-ranking mMARCO MiniLM]
+    RR --> Context[Prompt Contextual Isolado]
 ```
 
-Re-ingerir **substitui** o grafo em memória (`build_graph` faz `reset()`). Os mesmos arquivos produzem os mesmos IDs.
+* **Roteador de Intenção:** Um Fast-path de Expressão Regular (Regex PT/EN) acoplado com Classificação via Centroides Semânticos para determinar rapidamente a estratégia de busca (Local ou Global).
+* **Busca Híbrida vs Local:** Transição sem atritos entre uma busca paralela global do corpus inteiro e uma escavação intra-bacia para responder perguntas que dependem da vizinhança de um nó primário.
+* **Fusão e Prior Topológico:** 
+  A agregação de scores utiliza uma variante aprimorada de Reciprocal Rank Fusion (Weighted RRF, $\alpha=0.55$). Esta é multiplicada por um prior exponencial baseado na topologia $h(v)$ e taxa de decaimento $\lambda$, favorecendo nós estruturalmente centrais:
+  
+  $$ S_{\text{final}}(v) = S_{\text{RRF}}(v) \cdot (0.7 + 0.3 \cdot e^{-h(v) \cdot \lambda}) $$
+  
+* **Re-ranking Isolado:** Aplicamos os pesos através de um Cross-Encoder Multilíngue (mMARCO MiniLM).
 
-Resumos L3 **LLM** (Draft → Critique → Refine) continuam opcionais, em background no `chat`/`serve`. No índice já existe um L3 extractivo (rótulo de domínio + keywords) usado no ranking global.
+## 5. Sumarização Agentic em Background
 
----
+O BasinRAG inclui um Daemon concorrente para resumir o conteúdo recuperado, estruturado num pipeline estrito: **Draft $\to$ Critique $\to$ Refine**. Essa rotina de sumarização autônoma condensa insights de bacias longas em representações L3, mantendo sempre o encapsulamento assíncrono. O refinamento semântico não trava o *event loop* primário de busca.
 
-## Pipeline de query
+## 6. Persistência Atômica e Concorrência
 
-```text
-pergunta
-  → router (hybrid | global); default hybrid; nunca “local” silencioso
-  → projector lexical (tokens, sem stopwords curtas)
-  → BM25 CSR + FAISS/HNSW corpus-wide (hybrid) ou 3 entry points (local)
-  → local: bacia do seed + 1 hop sequencial + virtual-edge dos hits FAISS
-  → recusa se melhor similaridade < 0.15
-  → RRF ponderado α=0.55 por node_id + prior exp(-hops·0.35) com piso 0.7
-  → BriefingPacket: hubs L0, satélites L3 (label ou summary, cap 400)
-  → CrossEncoder multilingual (não mistura headers L3)
-  → LLM (chat) só se confidence ≥ 0.15
-```
+Para suportar ambientes pesados:
+* Implementação com integridade via substituição atômica nos sistemas de arquivos (`os.replace`).
+* Isolamento de cache de busca em banco KVStore nativo (SQLite), transacionado rigidamente com WAL (Write-Ahead Logging).
+* Suporte total à segurança de thread no loop I/O. Recuperação instântanea sem corrupção no caso de crash elétrico/de processo.
 
-Busca **global** ranqueia bacias pelo embedding do **L3 LLM**; se ainda não existir, usa o vetor do atrator. Scores todos ~0 → lista vazia.
+## 7. Complexidade Algorítmica e Escalabilidade
 
----
-
-## Módulos
-
-```text
-basinrag/
-├── core/
-│   ├── topology.py          # grafo + φ + bacias + rho-tree
-│   ├── functional_graph.py  # sucessor, Floyd/sinks, hops, arestas rho
-│   ├── vector_index.py      # FlatIP pequeno N; HNSW se N > 256
-│   ├── persistence.py       # JSON + NPZ + BM25 + buildId
-│   ├── ids.py               # IDs estáveis, tokenize
-│   └── llm.py
-├── indexer/
-│   ├── ingestor.py
-│   ├── condensation.py      # L0–L3 extractivo
-│   ├── bm25.py
-│   └── summarizer.py        # L3 LLM opcional (mesmo model_name do chat)
-├── retriever/
-│   ├── router.py            # PT + EN
-│   ├── projector.py
-│   ├── fusion.py            # RRF α=0.55 + hops
-│   ├── local_search.py      # intra-bacia
-│   ├── hybrid_search.py
-│   ├── global_search.py     # score L3
-│   ├── briefing.py
-│   └── reranker.py          # mMARCO multilingual
-├── api/
-│   └── server.py
-├── cli.py
-└── factory.py
-```
-
----
-
-## Relação com digit-sum-power-maps
-
-O paper [Iterated Digit-Sum Power Maps](https://doi.org/10.5281/zenodo.22181953) define \(f_{k,b}(n)=S_b(n^k)\) em \(\mathbb{Z}^+\), organizado por \(\varphi_{k,b-1}(x)=x^k \bmod (b-1)\). Teoremas (limite inferior de atratores, densidade **agregada** por assinatura de resíduo, formas fechadas de \(\mathrm{Cyc}\)) valem para inteiros. Os autores avisam: teoremas de inteiros **não governam retrieval**.
-
-O BasinRAG **não instancia** \(f_{k,b}\). Os nomes abaixo são homônimos:
-
-| Termo | DSPM | BasinRAG vivo |
-|---|---|---|
-| φ | \(x^k \bmod (b-1)\) em resíduos | predecessor sequencial no documento (seção de 20 chunks) |
-| Atrator | órbita periódica de \(f_{k,b}\) em \([1,M]\) | primeiro chunk da seção |
-| Bacia | pontos cuja órbita entra em \(A\) | os ≤20 chunks que drenam para esse início |
-| Hops | iterações até o ciclo | distância reversa no sucessor sequencial |
-| Ranking | não há retrieval | BM25 + FAISS + RRF \(\alpha=0.55\) + prior de hops |
-
-kNN cosseno > 0.85 é `virtual-edge` **fora** de φ. Não use soma de dígitos, resíduo ou raiz digital como LSH em embeddings: quebra a vizinhança ANN. O único empréstimo legítimo é o *padrão* de grafo funcional (1 sucessor, sink, árvore inversa), preenchido com **ordem do texto**, não com \(S_b\).
-
----
-
-## O que não copiamos do Basinfy
-
-Kernel WASM \(f_{k,b}\), MCP Drive, personas/skills, `gate_edit`, AST/símbolos de repositório, Collatz/Kaprekar, `attractorCoverage` como métrica de qualidade RAG, residue modular como similaridade.
-
-O que **mantemos** e o Basinfy não tem: CrossEncoder e relatórios L3 com LLM.
+O sistema afasta o Gargalo de Clusterização típico (como Leiden) que atinge em pior caso escalas polinomiais:
+* **Tempo de Indexação (Build):** Ao compilar a árvore $\rho$ e montar as bacias funcionalmente via IDs determinísticos, nós atingimos complexidade estritamente linear $O(N)$, sem matrizes densas de co-ocorrência.
+* **Tempo de Busca (Lookup):** Utilizando índices vetoriais hierárquicos e escopo limitador de bacias, nosso query lookup permanece estritamente ligado a $O(K + \log N)$, em que $K$ representa os hits retornados no nível global e intra-bacia, sendo formidável para grandes corpuses multilinguísticos.

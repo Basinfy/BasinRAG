@@ -1,6 +1,7 @@
 import os
 import json
 import shutil
+import time
 import uuid
 import numpy as np
 import networkx as nx
@@ -42,7 +43,57 @@ def load_graph(data: Dict[str, Any]):
         return nx.node_link_graph(payload)
 
 
+def safe_replace_dir(src_dir: str, dst_dir: str, retries: int = 5, delay: float = 0.1) -> None:
+    """Substituição segura e transacional de diretórios compatível com Windows e Linux."""
+    if not os.path.exists(src_dir):
+        raise FileNotFoundError(f"Diretório de origem não existe: {src_dir}")
+
+    if not os.path.exists(dst_dir):
+        os.rename(src_dir, dst_dir)
+        return
+
+    dead_dir = f"{dst_dir}.dead.{uuid.uuid4().hex[:8]}"
+
+    # 1. Move diretório ativo para área transitória
+    for attempt in range(retries):
+        try:
+            os.rename(dst_dir, dead_dir)
+            break
+        except OSError:
+            if attempt == retries - 1:
+                # Fallback: cópia arquivo a arquivo com substituição
+                for fname in os.listdir(src_dir):
+                    s_file = os.path.join(src_dir, fname)
+                    d_file = os.path.join(dst_dir, fname)
+                    if os.path.isfile(s_file):
+                        shutil.copy2(s_file, d_file)
+                shutil.rmtree(src_dir, ignore_errors=True)
+                return
+            time.sleep(delay * (2 ** attempt))
+
+    # 2. Ativa novo diretório
+    try:
+        os.rename(src_dir, dst_dir)
+    except Exception as exc:
+        try:
+            os.rename(dead_dir, dst_dir)
+        except Exception:
+            pass
+        raise RuntimeError(f"Falha crítica ao ativar novo diretório: {exc}") from exc
+
+    # 3. Remove pasta morta com retry
+    for attempt in range(retries):
+        try:
+            shutil.rmtree(dead_dir, ignore_errors=False)
+            break
+        except OSError:
+            if attempt == retries - 1:
+                shutil.rmtree(dead_dir, ignore_errors=True)
+            time.sleep(delay * (2 ** attempt))
+
+
 class BasinPersistence:
+
     """Split persistence: metadata JSON, embeddings NPZ, BM25 JSON, buildId."""
 
     def __init__(self, storage_dir: str = ".basinrag"):
@@ -107,15 +158,7 @@ class BasinPersistence:
                 if os.path.exists(src):
                     os.replace(src, os.path.join(self.storage_dir, name))
 
-            live_basins = self.basins_dir
-            old_basins = live_basins + ".old"
-            if os.path.isdir(old_basins):
-                shutil.rmtree(old_basins, ignore_errors=True)
-            if os.path.isdir(live_basins):
-                os.replace(live_basins, old_basins)
-            os.replace(basins_tmp, live_basins)
-            if os.path.isdir(old_basins):
-                shutil.rmtree(old_basins, ignore_errors=True)
+            safe_replace_dir(basins_tmp, self.basins_dir)
 
             shutil.rmtree(tmp, ignore_errors=True)
             return True
@@ -174,17 +217,34 @@ class BasinPersistence:
                 with open(meta_path, "r", encoding="utf-8") as f:
                     meta = json.load(f)
                 succ_data = meta.get("successor", {})
-                for k, v in succ_data.items():
-                    engine.successor[k] = v if v is not None else None
+                if hasattr(engine.successor, "clear"):
+                    engine.successor.clear()
+                if hasattr(engine.successor, "set_many"):
+                    engine.successor.set_many(succ_data)
+                else:
+                    for k, v in succ_data.items():
+                        engine.successor[k] = v if v is not None else None
+
                 attr_data = meta.get("attractor_of", {})
-                for k, v in attr_data.items():
-                    engine.attractor_of[k] = v
+                if hasattr(engine.attractor_of, "clear"):
+                    engine.attractor_of.clear()
+                if hasattr(engine.attractor_of, "set_many"):
+                    engine.attractor_of.set_many(attr_data)
+                else:
+                    for k, v in attr_data.items():
+                        engine.attractor_of[k] = v
                 engine.section_size = meta.get("section_size", 20)
                 engine.encoder_model = meta.get("encoder_model", "")
                 meta_build_id = meta.get("buildId", "") or ""
             else:
-                engine.successor = {}
-                engine.attractor_of = {}
+                if hasattr(engine.successor, "clear"):
+                    engine.successor.clear()
+                else:
+                    engine.successor = {}
+                if hasattr(engine.attractor_of, "clear"):
+                    engine.attractor_of.clear()
+                else:
+                    engine.attractor_of = {}
                 engine.encoder_model = ""
             engine.build_id = meta_build_id
 
@@ -192,6 +252,19 @@ class BasinPersistence:
 
             engine.basins = {}
             preserve_l3: Dict[str, Dict[str, Any]] = {}
+            if not os.path.exists(self.basins_dir) and os.path.exists(self.storage_dir):
+                # Auto-recovery: checa diretórios transitórios se o principal estiver ausente
+                for entry in os.listdir(self.storage_dir):
+                    if entry.startswith("basins.dead") or entry.startswith("basins.tmp"):
+                        cand = os.path.join(self.storage_dir, entry)
+                        if os.path.isdir(cand):
+                            try:
+                                os.rename(cand, self.basins_dir)
+                                logger.info(f"Auto-recuperação bem-sucedida da pasta de bacias a partir de {entry}")
+                                break
+                            except Exception:
+                                pass
+
             if os.path.exists(self.basins_dir):
                 for fname in os.listdir(self.basins_dir):
                     if not fname.endswith(".json"):

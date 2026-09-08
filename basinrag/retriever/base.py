@@ -37,7 +37,9 @@ class BasinRAGRetriever(BaseRetriever):
         self._global = TopologicalGlobalSearch(self.engine, self.encoder)
         self._hybrid = HybridSearch(self.engine, self._local)
         self._reranker = CrossEncoderReranker(model_name=self.reranker_model)
-        IntelligentQueryRouter.train_centroids(self.encoder)
+        if self.encoder is not None and getattr(IntelligentQueryRouter, "_global_centroid", None) is None:
+            IntelligentQueryRouter.train_centroids(self.encoder)
+
 
     def configure(self, search_type: Optional[str] = None, top_k: Optional[int] = None):
         if search_type is not None:
@@ -85,9 +87,6 @@ class BasinRAGRetriever(BaseRetriever):
             if not nodes:
                 return packet
             self._fill_from_nodes(packet, nodes, [])
-
-        if packet.confidence < MIN_CONFIDENCE:
-            packet.confidence = MIN_CONFIDENCE
 
         rerankable = packet.texts_for_rerank()
         if rerankable and self._reranker:
@@ -137,6 +136,21 @@ class BasinRAGRetriever(BaseRetriever):
     ) -> List[Document]:
         packet = self.brief(query)
         docs = []
-        for text in packet.texts_for_rerank()[: self.top_k]:
-            docs.append(Document(page_content=text))
+        texts = packet.texts_for_rerank()[: self.top_k]
+        for i, text in enumerate(texts):
+            meta = {}
+            if i < len(packet.node_ids):
+                nid = packet.node_ids[i]
+                if hasattr(self.engine, "graph") and nid in self.engine.graph:
+                    node_data = self.engine.graph.nodes[nid]
+                    meta = dict(node_data.get("metadata") or {})
+                    meta["node_id"] = nid
+                    meta["source"] = node_data.get("source", "")
+                    meta["doc_id"] = meta.get("doc_id") or node_data.get("source", "")
+            docs.append(Document(page_content=text, metadata=meta))
         return docs
+
+
+# Dual-Layer Adapter alias
+TopologicalRetriever = BasinRAGRetriever
+

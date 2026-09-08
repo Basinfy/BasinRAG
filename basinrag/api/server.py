@@ -37,12 +37,19 @@ async def lifespan(app: FastAPI):
     global _rag_instance
     logger.info("Inicializando BasinRAG...")
     _rag_instance = BasinRAG.create()
-    asyncio.create_task(_rag_instance.start_background_summarizer(verbose=True))
+    bg_task = asyncio.create_task(_rag_instance.start_background_summarizer(verbose=True))
     logger.info("BasinRAG Pronto!")
-    yield
-    if _rag_instance:
-        _rag_instance.persistence.save_topology(_rag_instance.engine)
-    _rag_instance = None
+    try:
+        yield
+    finally:
+        bg_task.cancel()
+        try:
+            await asyncio.gather(bg_task, return_exceptions=True)
+        except Exception:
+            pass
+        if _rag_instance:
+            _rag_instance.persistence.save_topology(_rag_instance.engine)
+        _rag_instance = None
 
 
 app = FastAPI(
@@ -70,14 +77,15 @@ def read_root():
 
 @app.post("/query", response_model=QueryResponse, dependencies=[Depends(verify_api_key)])
 @limiter.limit("30/minute")
-def query_sync(request: Request, body: QueryRequest):
+async def query_endpoint(request: Request, body: QueryRequest):
     rag = _get_rag()
-    docs = rag.query(
+    docs = await rag.aquery(
         body.query,
         search_type=body.search_type,
         top_k=body.top_k,
     )
     return {"results": [d.page_content for d in docs]}
+
 
 
 @app.websocket("/chat")

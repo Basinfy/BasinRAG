@@ -2,6 +2,42 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.0] - 2026-09-06
+
+### Added
+- **Suíte Oficial MTEB (Hugging Face Leaderboard)**:
+  - Runner de avaliação padronizada `basinrag.eval.run_mteb` compatível com MTEB v2.20+.
+  - Implementação estrita do `SearchProtocol` e `ModelMeta` Pydantic v2 em `basinrag.eval.mteb_wrapper`.
+  - Execução oficial completa de 300 queries de teste no dataset `SciFact` ($k \le 1000$).
+  - Geração automática do pacote oficial de submissão do Leaderboard do Hugging Face (`results/mteb/results/alexmart1ns__BasinRAG-2.0/2.0.0/`).
+- **Documentação Comparativa Global**:
+  - Atualização completa do `README.md` com tabelas comparativas contra baselines mundiais (ColBERT, Contriever, BGE-large, SPLADE, BM25, GraphRAG, HyperFL).
+  - Publicação do relatório técnico detalhado `relatorio_comparativo_tops_globais.md`.
+
+---
+
+## [2.0.0] - 2026-09-05
+
+### Added
+- **Suite Oficial de Benchmarking Comparativo (BasinRAG 2.0 vs GraphRAG)**:
+  - Integração oficial com o framework BEIR (`beir.retrieval.evaluation.EvaluateRetrieval`) no dataset `scifact` (5.183 documentos).
+  - Runner comparativo de código real no SWE-bench Lite (`basinrag.eval.compare_graphrag`) com 13 instâncias de produção (`flask`, `requests`, `seaborn`).
+  - Documento mestre de benchmarks em `BENCHMARKS.md` e logs exportados em `logs/beir_comparison_scifact.json` e `logs/basinrag_vs_graphrag.jsonl`.
+- **Topologia de Bacias em 2 Níveis (Meta-Basins)**:
+  - Agrupamento hierárquico de bacias funcionalmente correlatas via `AgglomerativeClustering` no espaço de atratores.
+- **Difusão Espectral Local por Personalized PageRank (PPR)**:
+  - Substituição da expansão heurística por difusão espectral analítica com Power Iteration sobre subgrafo induzido da bacia.
+- **Fusão Canônica Min-Max RRF**:
+  - Normalização unificada de escores densos e esparsos (BM25) evitando distorção de escala em consultas híbridas.
+
+### Fixed
+- **Prevenção de Perda de Dados em Bacias**: Eliminada a remoção destrutiva de nós com hops elevados em `compute_trapping_bounds`.
+- **Compatibilidade e Resiliência no Windows**: `safe_replace_dir` com tratamento seguro de handles e concorrência multithread com `RLock` no SQLite DiskKVStore.
+- **Operações Não-Bloqueantes no FastAPI**: Métodos assíncronos (`aquery`, `abrief`, `achat`) delegados para threads de background via `asyncio.to_thread`.
+- **GraphRAG Baseline**: Correção do parsing de noun chunks no SpaCy e adição de extração de identificadores de código (`CamelCase` e `snake_case`).
+
+---
+
 ## [0.2.1] - 2026-09-01
 
 ### Fixed

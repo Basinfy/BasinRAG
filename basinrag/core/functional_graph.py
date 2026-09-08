@@ -1,8 +1,8 @@
 """Functional-graph collapse for document chunks.
 
 Each chunk has one successor (φ): the previous chunk in the same source
-section. Semantic kNN edges stay virtual and never define φ — the same
-rule Basinfy uses for import vs HNSW synapses.
+section. Semantic kNN edges stay virtual and never define φ — maintaining strict
+separation between primary topological flow and auxiliary semantic synapses.
 
 Attractors are section-start sinks. Hops are reverse-BFS distance along φ.
 """
@@ -121,9 +121,12 @@ def detect_attractors(successor: Dict[str, Optional[str]]) -> Dict[str, str]:
             
     return assigned
 
-def compute_trapping_bounds(hops: int, max_hops: int = 5) -> bool:
-    """Evaluate if a node falls within the trapping bound (False if peripheral)."""
-    return hops <= max_hops
+def compute_trapping_bounds(hops: int, max_hops: int = 50) -> bool:
+    """Evaluate if a node falls within the trapping bound for retrieval expansion (False if peripheral).
+    
+    This function does NOT delete or prune nodes from the graph/index.
+    """
+    return 0 <= hops <= max_hops
 
 def reverse_hops(
     successor: Dict[str, Optional[str]],

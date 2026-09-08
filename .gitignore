@@ -37,3 +37,8 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Evaluation artifacts
+logs/run_evaluation/
+gold.*.json
+

@@ -1,100 +1,143 @@
 import os
+import sys
+
+# Patch PyTorch DTensor para compatibilidade do SentenceTransformers/Transformers no PyTorch 2.4
+try:
+    import torch.distributed._tensor as _t
+    sys.modules.setdefault("torch.distributed.tensor", _t)
+except Exception:
+    pass
+
 import time
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 import numpy as np
+
+from mteb.models.model_meta import ModelMeta
+
 
 class BasinRAGMTEBWrapper:
     """
-    Wrapper para o MTEB que encapsula o BasinRAG.
-    O MTEB verifica se o modelo possui o método 'search'. Se sim, ele não tentará extrair embeddings
-    manualmente, e sim repassará o controle de busca (corpus, queries) para este método.
+    Wrapper para o MTEB (v2.20+) que implementa o SearchProtocol oficial para o BasinRAG 2.0.
     """
     def __init__(self, rag_instance, search_type: str = "hybrid"):
         self.rag = rag_instance
         self.search_type = search_type
 
-    def index(self, corpus: Dict[str, Dict[str, str]], *args, **kwargs):
-        print(f"\n[MTEB Wrapper] Iniciando indexação de {len(corpus)} documentos no BasinRAG...")
-        
-        # 1. Indexar corpus no BasinRAG
+    def index(
+        self,
+        corpus: Any,
+        *,
+        task_metadata: Any = None,
+        hf_split: str = "test",
+        hf_subset: str = "default",
+        encode_kwargs: Any = None,
+        num_proc: Optional[int] = None,
+        **kwargs
+    ) -> None:
         from basinrag.indexer.condensation import node_layers
-        chunks = []
+
         if isinstance(corpus, dict):
             doc_ids = list(corpus.keys())
             doc_texts = [f"{corpus[did].get('title', '')} {corpus[did].get('text', '')}".strip() for did in doc_ids]
         else:
-            # HuggingFace Dataset format
-            doc_ids = corpus["id"] if "id" in corpus.column_names else corpus["_id"]
-            titles = corpus["title"] if "title" in corpus.column_names else [""] * len(doc_ids)
-            doc_texts = [f"{t} {x}".strip() for t, x in zip(titles, corpus["text"])]
-        
-        batch_size = 32
-        print(f"Gerando embeddings para {len(doc_texts)} documentos...")
-        
-        # O BasinRAG usará o Qwen3-Embedding (que foi passado na config)
-        for i in range(0, len(doc_texts), batch_size):
-            batch_texts = doc_texts[i:i+batch_size]
-            batch_ids = doc_ids[i:i+batch_size]
-            
-            # Aqui geramos embeddings diretamente do encoder do BasinRAG
-            embs = self.rag.ingestor.encoder.encode(batch_texts)
-            for j, (text, doc_id, emb) in enumerate(zip(batch_texts, batch_ids, embs)):
-                layers = node_layers(text)
-                chunks.append({
-                    "id": doc_id,
-                    "text": text,
-                    "embedding": emb,
-                    "source": "mteb",
-                    "chunk_index": 0,
-                    "l1": layers["l1"],
-                    "l2": layers["l2"],
-                    "metadata": {"id": doc_id}
-                })
-        
-        print("[MTEB Wrapper] Construindo Bacias de Atração...")
-        self.rag.engine.build_graph(chunks)
+            # HuggingFace Dataset
+            doc_ids = list(corpus["id"] if "id" in corpus.column_names else corpus["_id"])
+            titles = list(corpus["title"]) if "title" in corpus.column_names else [""] * len(doc_ids)
+            texts = list(corpus["text"])
+            doc_texts = [f"{t} {x}".strip() for t, x in zip(titles, texts)]
+
+        print(f"\n[MTEB Wrapper] Indexando {len(doc_texts)} documentos no BasinRAG ({self.search_type})...")
+
+        batch_size = 64
+        all_embeddings = self.rag.ingestor.encoder.encode(
+            doc_texts,
+            batch_size=batch_size,
+            normalize_embeddings=True,
+            show_progress_bar=True,
+        )
+
+        nodes = []
+        for doc_id, text, emb in zip(doc_ids, doc_texts, all_embeddings):
+            layers = node_layers(text)
+            nodes.append({
+                "id": str(doc_id),
+                "text": text,
+                "embedding": emb,
+                "source": str(doc_id),
+                "chunk_index": 0,
+                "l1": layers["l1"],
+                "l2": layers["l2"],
+                "metadata": {"doc_id": str(doc_id), "id": str(doc_id)},
+            })
+
+        print("[MTEB Wrapper] Construindo Bacias de Atração e Grafo Funcional...")
+        self.rag.engine.encoder_model = self.rag.config.encoder_model
+        self.rag.engine.build_graph(nodes)
         self.rag.engine.partition_into_basins()
+        self.rag.engine.build_meta_basins()
         self.rag._attach_bm25()
-        self.text_to_id = {text: docid for docid, text in zip(doc_ids, doc_texts)}
+        self.rag.retriever = None
 
     def search(
-        self, 
-        *args,
+        self,
+        queries: Any,
+        *,
+        task_metadata: Any = None,
+        hf_split: str = "test",
+        hf_subset: str = "default",
+        top_k: int = 10,
+        encode_kwargs: Any = None,
+        top_ranked: Any = None,
+        num_proc: Optional[int] = None,
         **kwargs
     ) -> Dict[str, Dict[str, float]]:
-        queries = kwargs.get("queries") or args[0]
-        if not isinstance(queries, dict):
-            q_ids = queries["id"] if "id" in queries.column_names else queries["_id"]
-            queries = {q: t for q, t in zip(q_ids, queries["text"])}
-        top_k = kwargs.get("top_k", 10)
-        print(f"[MTEB Wrapper] Executando {len(queries)} queries ({self.search_type})...")
-        results = {}
-        for qid, qtext in queries.items():
-            docs = self.rag.query(qtext, search_type=self.search_type, top_k=top_k)
-            doc_scores = {}
+        if isinstance(queries, dict):
+            query_dict = queries
+        else:
+            q_ids = list(queries["id"] if "id" in queries.column_names else queries["_id"])
+            q_texts = list(queries["text"])
+            query_dict = {str(qid): text for qid, text in zip(q_ids, q_texts)}
+
+        print(f"[MTEB Wrapper] Executando busca para {len(query_dict)} queries no BasinRAG (top_k={top_k})...")
+        results: Dict[str, Dict[str, float]] = {}
+
+        for qid, qtext in query_dict.items():
+            docs = self.rag.query(qtext, search_type=self.search_type, top_k=max(20, top_k * 2))
+            doc_scores: Dict[str, float] = {}
             for rank, d in enumerate(docs):
-                found_id = getattr(self, "text_to_id", {}).get(d.page_content, "")
-                if found_id:
-                    doc_scores[found_id] = 1.0 / (rank + 1.0)
-            results[qid] = doc_scores
-            
+                meta = getattr(d, "metadata", {}) or {}
+                found_id = str(meta.get("doc_id") or meta.get("id") or meta.get("source") or meta.get("node_id") or "")
+                if found_id and found_id not in doc_scores:
+                    score = float(getattr(d, "score", 0.0) or (1.0 / (rank + 1.0)))
+                    doc_scores[found_id] = score
+                if len(doc_scores) >= top_k:
+                    break
+            results[str(qid)] = doc_scores
+
         return results
 
     @property
-    def mteb_model_meta(self):
-        import mteb
-        return mteb.get_model_meta("BAAI/bge-small-en-v1.5")
+    def mteb_model_meta(self) -> ModelMeta:
+        return ModelMeta(
+            name="alexmart1ns/BasinRAG-2.0",
+            revision="2.0.0",
+            release_date="2026-09-05",
+            languages=["eng", "por"],
+            framework=["PyTorch", "Sentence Transformers"],
+            similarity_fn_name="cosine",
+            use_instructions=False,
+            reference="https://github.com/alexmart1ns/BasinRAG",
+            license="mit",
+            model_type=["hybrid"],
+            loader=None,
+            n_parameters=118_000_000,
+            memory_usage_mb=450.0,
+            max_tokens=512,
+            embed_dim=384,
+            open_weights=True,
+            public_training_code="https://github.com/alexmart1ns/BasinRAG",
+            public_training_data=None,
+            training_datasets=None,
+        )
 
-class DenseOnlyMTEBWrapper:
-    """Wrapper para rodar o modelo Dense (Qwen) PURO sem grafos no MTEB."""
-    def __init__(self, encoder_model_name: str):
-        from sentence_transformers import SentenceTransformer
-        self.model = SentenceTransformer(encoder_model_name, trust_remote_code=True)
-        
-    def encode(self, sentences: List[str], **kwargs) -> np.ndarray:
-        return self.model.encode(sentences, **kwargs)
 
-    @property
-    def mteb_model_meta(self):
-        from mteb.models.model_meta import ModelMeta
-        return ModelMeta(name="DenseBaseline", languages=["eng"])

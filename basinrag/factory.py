@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass
 from typing import Optional
 from .logging_config import setup_logging
@@ -45,6 +46,8 @@ class BasinRAG:
         )
         self.retriever: Optional[BasinRAGRetriever] = None
         self._loaded = False
+        self._inference_semaphore: Optional[asyncio.Semaphore] = None
+
 
     @classmethod
     def create(cls, **kwargs) -> "BasinRAG":
@@ -77,7 +80,10 @@ class BasinRAG:
 
     def _attach_bm25(self) -> None:
         ids = list(self.engine.graph.nodes)
-        texts = [self.engine.graph.nodes[n].get("text", "") for n in ids]
+        texts = [
+            f"{self.engine.graph.nodes[n].get('l1', '')} {self.engine.graph.nodes[n].get('text', '')}".strip()
+            for n in ids
+        ]
         index = BM25Index()
         index.build(ids, texts)
         self.engine.bm25 = index
@@ -95,22 +101,41 @@ class BasinRAG:
         self.engine.encoder_model = self.config.encoder_model
         self.engine.build_graph(nodes)
         self.engine.partition_into_basins()
+        self.engine.build_meta_basins()
         self._attach_bm25()
         self.retriever = None
         self.persistence.save_topology(self.engine)
+
         logger.info(
             "Resumos L3 LLM serao gerados em background ao iniciar "
             "'basinrag chat' ou 'basinrag serve'. L3 extractivo ja esta no indice."
         )
         return len(nodes)
 
+    def _get_semaphore(self) -> asyncio.Semaphore:
+        if self._inference_semaphore is None:
+            self._inference_semaphore = asyncio.Semaphore(2)
+        return self._inference_semaphore
+
     def query(self, question: str, search_type: str = None, top_k: int = None) -> list:
         self._ensure_retriever(search_type, top_k)
         return self.retriever.invoke(question)
 
+    async def aquery(self, question: str, search_type: str = None, top_k: int = None) -> list:
+        """Versão assíncrona não-bloqueante de query executada em worker thread."""
+        self._ensure_retriever(search_type, top_k)
+        async with self._get_semaphore():
+            return await asyncio.to_thread(self.retriever.invoke, question)
+
     def brief(self, question: str, search_type: str = None, top_k: int = None) -> BriefingPacket:
         self._ensure_retriever(search_type, top_k)
         return self.retriever.brief(question)
+
+    async def abrief(self, question: str, search_type: str = None, top_k: int = None) -> BriefingPacket:
+        """Versão assíncrona não-bloqueante de brief executada em worker thread."""
+        self._ensure_retriever(search_type, top_k)
+        async with self._get_semaphore():
+            return await asyncio.to_thread(self.retriever.brief, question)
 
     def _ensure_retriever(self, search_type: str = None, top_k: int = None) -> None:
         resolved_type = search_type if search_type is not None else self.config.search_type
@@ -133,7 +158,7 @@ class BasinRAG:
         )
 
     async def chat(self, question: str, system_prompt: str = None):
-        packet = self.brief(question)
+        packet = await self.abrief(question)
         context = packet.as_context()
         if not packet.hubs and not packet.neighbors:
             yield (
@@ -141,7 +166,7 @@ class BasinRAG:
                 "(basinrag ingest <pasta>) e tente outra pergunta."
             )
             return
-        if packet.confidence < MIN_CONFIDENCE:
+        if packet.confidence < self.config.min_confidence:
             yield (
                 "Nenhum trecho suficientemente relevante para esta pergunta. "
                 "Tente termos mais especificos ou outra formulacao."
@@ -151,3 +176,4 @@ class BasinRAG:
         user_prompt = f"Contexto:\n{context}\n\nPergunta: {question}\nResposta:"
         async for token in self._ensure_llm().chat_stream(sys_prompt, user_prompt):
             yield token
+

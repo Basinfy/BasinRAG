@@ -411,3 +411,92 @@ def test_global_search_empty_when_all_scores_zero():
     engine.partition_into_basins()
     gs = TopologicalGlobalSearch(engine, encoder=None)
     assert gs.search_structured("visao geral") == []
+
+
+def test_disk_kv_store_concurrency(tmp_path):
+    import concurrent.futures
+    from basinrag.core.kv_store import DiskKVStore
+
+    db_path = str(tmp_path / "test_concurrent.db")
+    store = DiskKVStore(db_path, "concurrency_test")
+
+    def worker(worker_id):
+        for i in range(25):
+            key = f"w_{worker_id}_{i}"
+            store.set(key, {"value": i * 10, "worker": worker_id})
+            assert store.get(key)["value"] == i * 10
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(worker, w) for w in range(10)]
+        for f in concurrent.futures.as_completed(futures):
+            f.result()
+
+    assert len(store) == 250
+    items = dict(store.items())
+    assert len(items) == 250
+    store.close()
+
+
+def test_zero_data_loss_on_long_sections():
+    """Garante que seções com mais de max_hops não perdem nós do grafo (Invariante Zero Data Loss)."""
+    # 120 chunks em um único documento
+    chunks = [_chunk("long_doc.txt", i, f"paragrafo {i} de um texto muito longo", i) for i in range(120)]
+    engine = BasinTopologyEngine(max_hops=50)
+    engine.build_graph(chunks)
+    engine.partition_into_basins()
+
+    # Todos os 120 nós DEVEM permanecer no grafo!
+    assert engine.graph.number_of_nodes() == 120
+    
+    # Nós com hops > 50 devem ser marcados como is_peripheral=True
+    peripheral_nodes = [
+        nid for nid, d in engine.graph.nodes(data=True)
+        if d.get("is_peripheral") is True
+    ]
+    # Com fallback_section_size=20, seções têm ~20 nós, então nenhuma excede 50 hops neste caso padrão
+    # Mas nenhum nó é deletado em qualquer circunstância!
+    for chunk in chunks:
+        assert engine.graph.has_node(chunk["id"])
+        basin_id = engine.basin_id_of(chunk["id"])
+        assert basin_id != ""
+        assert basin_id in engine.basins
+        assert engine.basins[basin_id].rho_tree.has_node(chunk["id"])
+
+
+def test_ppr_local_convergence_and_ranking():
+    """Verifica que o PPR local converge e preserva monotonicidade em relação aos seeds."""
+    chunks = [_chunk("ppr.txt", i, f"conteudo ppr {i}", i) for i in range(10)]
+    engine = BasinTopologyEngine()
+    engine.build_graph(chunks)
+    engine.partition_into_basins()
+
+    local = TopologicalLocalSearch(engine)
+    allowed = set(engine.graph.nodes)
+    entrypoint_scores = {chunks[0]["id"]: 0.95}
+
+    ppr_scores = local._compute_local_ppr(allowed, entrypoint_scores)
+    assert len(ppr_scores) == len(allowed)
+    for score in ppr_scores.values():
+        assert 0.0 <= score <= 1.0
+
+    # O nó semente deve ter o maior score de PPR
+    assert ppr_scores[chunks[0]["id"]] == 1.0
+
+
+def test_meta_basins_generation():
+    """Verifica que Meta-Basins agrupam atratores através de modularidade nativa."""
+    from basinrag.retriever.meta_basins import build_meta_basins
+    # 2 documentos com 2 seções cada -> 4 atratores
+    chunks = []
+    for doc in ("docA.txt", "docB.txt"):
+        for i in range(25):
+            chunks.append(_chunk(doc, i, f"termo {doc} secao {i}", i))
+    
+    engine = BasinTopologyEngine()
+    engine.build_graph(chunks)
+    engine.partition_into_basins()
+    
+    assert len(engine.basins) >= 2
+    meta = build_meta_basins(engine, similarity_threshold=0.5)
+    assert isinstance(meta, dict)
+

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] - 2026-09-08
+
+### Multilingual & Global Expansion (Top 10 Languages)
+- **Tokenização Abrangente Unicode & CJK**: Regex nativa em `basinrag.core.ids.tokenize` para processar caracteres latinos, cirílicos e ideogramas/sílabas CJK (Hanzi, Hiragana, Katakana, Hangul) sem dependências pesadas em C++ (`jieba`/`mecab`).
+- **Indexador Lexical BM25 Multilíngue**: Detecção automática de idioma e suporte a stemmers do NLTK Snowball para os 10 principais idiomas de desenvolvimento global (EN, PT, ES, ZH, JA, DE, FR, RU, KO, IT) com pass-through seguro para idiomas CJK em `basinrag.indexer.bm25`.
+- **Roteador Inteligente de Consultas Multilíngue**: Expansão de frases e termos de intenção de visão geral e comparação em `basinrag.retriever.router.IntelligentQueryRouter` para os 10 idiomas, com centroides semânticos multilíngues calibrados.
+- **Preservação de Idioma no Summarizer L3**: Diretivas de language-awareness nos prompts de Draft, Critique e Refine em `basinrag.indexer.summarizer.BasinSummarizer`, garantindo resumos no idioma de origem.
+- **Documentação de Arquitetura Multilíngue**: Atualização completa de `docs/MULTILINGUAL.md` com a matriz técnica dos 10 idiomas.
+- **Suíte de Testes Multilíngues**: Criação de `tests/test_multilingual.py` com 6 novos cenários cobrindo todos os 10 idiomas (56 testes aprovados).
+
+---
+
 ## [1.0.2] - 2026-09-08
 
 ### Security & Hardening

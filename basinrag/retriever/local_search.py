@@ -1,6 +1,5 @@
 from typing import List, Dict, Any
 import numpy as np
-from collections import deque
 from ..core.topology import BasinTopologyEngine
 from ..core.vector_index import build_ip_index
 from .fusion import HOP_LAMBDA

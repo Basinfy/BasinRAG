@@ -11,7 +11,7 @@ from .indexer.ingestor import BasinIngestor
 from .indexer.summarizer import BasinSummarizer
 from .indexer.bm25 import BM25Index
 from .retriever.base import BasinRAGRetriever
-from .retriever.briefing import BriefingPacket, MIN_CONFIDENCE
+from .retriever.briefing import BriefingPacket
 
 
 @dataclass

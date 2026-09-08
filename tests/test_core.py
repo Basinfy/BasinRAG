@@ -1,6 +1,5 @@
 import numpy as np
 import os
-import pytest
 
 from basinrag.core.ids import make_node_id, tokenize
 from basinrag.core.functional_graph import (
@@ -319,7 +318,6 @@ def test_projector_ignores_short_stopwords():
 
 
 def test_save_leaves_no_tmp_and_rebuilds_missing_basins(tmp_path):
-    import json
     import shutil
 
     chunks = [

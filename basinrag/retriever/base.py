@@ -10,8 +10,7 @@ from .global_search import TopologicalGlobalSearch
 from .hybrid_search import HybridSearch
 from .reranker import CrossEncoderReranker
 from .router import IntelligentQueryRouter
-from .briefing import BriefingPacket, MIN_CONFIDENCE, cap_satellite
-from .projector import seed_node_ids
+from .briefing import BriefingPacket, cap_satellite
 
 
 class BasinRAGRetriever(BaseRetriever):

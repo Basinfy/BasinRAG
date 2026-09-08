@@ -1,6 +1,6 @@
 import re
 import spacy
-from typing import Dict, List, Set, Tuple, Optional
+from typing import Dict, List, Set, Tuple
 import math
 from collections import defaultdict
 

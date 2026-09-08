@@ -1,18 +1,15 @@
-import os
-import shutil
 import pytest
-import numpy as np
 import basinrag
 from basinrag import __version__
-from basinrag.core.persistence import safe_replace_dir, BasinPersistence
+from basinrag.core.persistence import safe_replace_dir
 from basinrag.core.kv_store import DiskKVStore
 from basinrag.core.llm import UniversalLLM
 
 
 def test_version_alignment():
-    """Valida alinhamento da versão 1.0.2 no __init__ e consistência do pacote."""
-    assert __version__ == "1.0.2"
-    assert basinrag.__version__ == "1.0.2"
+    """Valida alinhamento da versão 1.0.3 no __init__ e consistência do pacote."""
+    assert __version__ == "1.0.3"
+    assert basinrag.__version__ == "1.0.3"
 
 
 def test_cli_version_flag():
@@ -25,7 +22,7 @@ def test_cli_version_flag():
         text=True,
     )
     assert result.returncode == 0
-    assert "1.0.2" in result.stdout or "1.0.2" in result.stderr
+    assert "1.0.3" in result.stdout or "1.0.3" in result.stderr
 
 
 def test_safe_replace_dir_preserves_subdirectories(tmp_path):

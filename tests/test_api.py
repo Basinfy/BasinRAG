@@ -1,7 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
-import basinrag.api.server
 
 @pytest.fixture
 def mock_rag():

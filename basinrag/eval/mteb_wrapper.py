@@ -1,4 +1,3 @@
-import os
 import sys
 
 # Patch PyTorch DTensor para compatibilidade do SentenceTransformers/Transformers no PyTorch 2.4
@@ -8,9 +7,7 @@ try:
 except Exception:
     pass
 
-import time
-from typing import Dict, List, Any, Optional
-import numpy as np
+from typing import Dict, Any, Optional
 
 from mteb.models.model_meta import ModelMeta
 

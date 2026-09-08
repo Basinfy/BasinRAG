@@ -10,7 +10,6 @@ from ..logging_config import setup_logging
 
 logger = setup_logging()
 
-from ..indexer.bm25 import BM25Index
 
 
 def dump_graph(graph) -> Dict[str, Any]:
@@ -310,6 +309,8 @@ class BasinPersistence:
                 engine.partition_into_basins(preserve_l3=preserve_l3)
 
             bm25_path = os.path.join(self.storage_dir, "bm25.json")
+            from ..indexer.bm25 import BM25Index
+
             engine.bm25 = BM25Index()
             if not engine.bm25.load(bm25_path):
                 engine.bm25 = None

@@ -2,7 +2,7 @@ import os
 import sqlite3
 import json
 import threading
-from typing import Any, Optional, Iterable, Iterator, Dict, List, Tuple
+from typing import Any, Iterator, Dict, List, Tuple
 
 class DiskKVStore:
     """

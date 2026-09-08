@@ -1,6 +1,6 @@
 import pytest
-from basinrag.factory import BasinRAG, BasinRAGConfig
-from basinrag.eval.datasets import get_mmarco_subset, load_faquad, extract_faquad_corpus_and_queries
+from basinrag.factory import BasinRAG
+from basinrag.eval.datasets import get_mmarco_subset
 from basinrag.eval.metrics import evaluate_retrieval
 
 @pytest.fixture(scope="module")
@@ -10,7 +10,6 @@ def mmarco_rag():
     
     # Ingest the mock corpus directly into the engine
     from basinrag.indexer.condensation import node_layers
-    from basinrag.core.ids import make_node_id
     import numpy as np
     
     chunks = []

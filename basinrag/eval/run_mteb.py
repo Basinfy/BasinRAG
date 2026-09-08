@@ -5,7 +5,6 @@ os arquivos oficiais de submissão para o Hugging Face MTEB Leaderboard.
 """
 from __future__ import annotations
 
-import os
 import sys
 import argparse
 from pathlib import Path
@@ -36,7 +35,7 @@ def main():
 
     task_names = [t.strip() for t in args.tasks.split(",") if t.strip()]
     print(f"\n{'='*70}")
-    print(f"      EXECUÇÃO OFICIAL MTEB (HUGGING FACE LEADERBOARD)")
+    print("      EXECUÇÃO OFICIAL MTEB (HUGGING FACE LEADERBOARD)")
     print(f"      Tarefas: {task_names} | Busca: {args.search_type}")
     print(f"{'='*70}\n")
 

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 import re
-import sys
 import json
 import argparse
 import subprocess
@@ -19,7 +18,7 @@ from typing import List, Dict, Set, Any, Optional
 import unidiff
 from datasets import load_dataset
 
-from ..factory import BasinRAG, BasinRAGConfig
+from ..factory import BasinRAG
 from ..logging_config import setup_logging
 
 logger = setup_logging()
@@ -458,7 +457,7 @@ def main():
         print(f"\n[{d['instance_id']}] Status: {status}")
         print(f"  Repo: {d['repo']}")
         print(f"  Arquivos do Bug (Ground Truth): {d['ground_truth_files']}")
-        print(f"  Top-5 Arquivos Recuperados pelo BasinRAG:")
+        print("  Top-5 Arquivos Recuperados pelo BasinRAG:")
         for r_rank, r_file in enumerate(d.get("retrieved_files_top5", []), 1):
             is_match = " [MATCH!]" if any(r_file == gt or gt.endswith(r_file) or r_file.endswith(gt) for gt in d['ground_truth_files']) else ""
             print(f"    {r_rank}. {r_file}{is_match}")

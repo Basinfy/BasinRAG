@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import math
 import os
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..core.ids import tokenize
 
@@ -15,32 +15,83 @@ K1 = 1.2
 B = 0.75
 
 _STOP = {
+    # Portuguese
     "a", "o", "os", "as", "um", "uma", "de", "da", "do", "das", "dos", "e", "ou",
-    "em", "no", "na", "nos", "nas", "para", "por", "com", "que", "se", "nao",
-    "não", "the", "and", "or", "of", "to", "in", "on", "for", "is", "are", "was",
+    "em", "no", "na", "nos", "nas", "para", "por", "com", "que", "se", "nao", "não",
+    # English
+    "the", "and", "or", "of", "to", "in", "on", "for", "is", "are", "was", "were",
     "be", "as", "at", "by", "an", "this", "that", "it", "from", "with",
+    # Spanish
+    "el", "la", "los", "las", "un", "una", "unos", "unas", "del", "al", "en", "para",
+    "por", "con", "que", "se", "no", "y", "o", "pero",
+    # French
+    "le", "la", "les", "un", "une", "des", "du", "de", "dans", "pour", "par", "avec",
+    "que", "qui", "ne", "pas", "et", "ou", "sur", "ce", "cette",
+    # German
+    "der", "die", "das", "den", "dem", "des", "ein", "eine", "einer", "einem", "einen",
+    "und", "oder", "in", "im", "für", "mit", "von", "zu", "ist", "sind", "nicht", "auf",
+    # Italian
+    "il", "la", "lo", "i", "gli", "le", "un", "uno", "una", "di", "del", "della",
+    "in", "nel", "nella", "per", "con", "che", "non", "e", "ed", "sono",
+    # Russian
+    "и", "в", "во", "не", "что", "он", "на", "я", "с", "со", "как", "а", "то",
+    "все", "она", "так", "его", "но", "да", "ты", "к", "у", "же", "вы", "за",
+    "бы", "по", "только", "ее", "мне", "было", "вот", "от", "меня", "еще", "нет",
+    "о", "из", "ему", "теперь", "когда", "даже", "ну", "вдруг", "ли", "если",
+    "уже", "или", "ни", "быть", "был", "до", "вас", "там", "потом", "себя", "для",
+    # CJK single particles / stop tokens
+    "的", "了", "和", "是", "就", "都", "而", "及", "與", "着",
+    "の", "に", "は", "を", "た", "が", "で", "て", "と", "し", "れ", "さ",
+    "이", "그", "저", "것", "수", "등", "들", "및", "에", "와", "과",
 }
 
-_stemmer_pt = None
-_stemmer_en = None
+_LANG_TO_SNOWBALL = {
+    "en": "english",
+    "pt": "portuguese",
+    "es": "spanish",
+    "fr": "french",
+    "de": "german",
+    "it": "italian",
+    "ru": "russian",
+}
+
+_STEMMERS: Dict[str, Any] = {}
+
+
+def _get_stemmer(lang: str):
+    global _STEMMERS
+    if lang in _STEMMERS:
+        return _STEMMERS[lang]
+    if lang in ("zh", "ja", "ko"):
+        _STEMMERS[lang] = None
+        return None
+    try:
+        import nltk
+        from nltk.stem import RSLPStemmer, SnowballStemmer
+        if lang == "pt":
+            try:
+                nltk.download("rslp", quiet=True)
+                stemmer = RSLPStemmer()
+            except Exception:
+                stemmer = SnowballStemmer("portuguese")
+            _STEMMERS["pt"] = stemmer
+            return stemmer
+        snowball_name = _LANG_TO_SNOWBALL.get(lang)
+        if snowball_name:
+            stemmer = SnowballStemmer(snowball_name)
+            _STEMMERS[lang] = stemmer
+            return stemmer
+    except Exception:
+        pass
+    _STEMMERS[lang] = False
+    return False
 
 
 def _get_stemmers():
-    global _stemmer_pt, _stemmer_en
-    if _stemmer_pt is None:
-        try:
-            import nltk
-            from nltk.stem import RSLPStemmer, SnowballStemmer
-            try:
-                nltk.download("rslp", quiet=True)
-            except Exception:
-                pass
-            _stemmer_pt = RSLPStemmer()
-            _stemmer_en = SnowballStemmer("english")
-        except Exception:
-            _stemmer_pt = False
-            _stemmer_en = False
-    return _stemmer_pt, _stemmer_en
+    """Backward compatibility helper for (pt, en) stemmers."""
+    pt = _get_stemmer("pt")
+    en = _get_stemmer("en")
+    return pt, en
 
 
 _PT_INDICATORS = {
@@ -54,42 +105,120 @@ _EN_INDICATORS = {
     "was", "were", "be", "been", "as", "at", "by", "an", "this",
     "that", "it", "from", "with", "which", "there", "have", "has",
 }
+_ES_INDICATORS = {
+    "el", "la", "los", "las", "un", "una", "unos", "unas", "del",
+    "al", "en", "para", "por", "con", "que", "como", "pero", "este",
+    "esta", "estos", "estas", "sobre", "entre", "también", "tambien",
+}
+_FR_INDICATORS = {
+    "le", "la", "les", "un", "une", "des", "du", "de", "dans",
+    "pour", "par", "avec", "sur", "est", "sont", "cette", "ce",
+    "ces", "qui", "que", "mais", "aussi",
+}
+_DE_INDICATORS = {
+    "der", "die", "das", "den", "dem", "des", "ein", "eine", "einer",
+    "einem", "einen", "und", "oder", "in", "im", "für", "mit",
+    "von", "zu", "ist", "sind", "nicht", "auf", "auch",
+}
+_IT_INDICATORS = {
+    "il", "la", "lo", "i", "gli", "le", "un", "uno", "una", "del",
+    "della", "dei", "degli", "delle", "in", "nel", "nella", "per",
+    "con", "che", "sono", "questo", "questa", "anche",
+}
 
 
 def detect_language(text: str, default: str = "pt") -> str:
-    """Detect whether text is Portuguese ('pt') or English ('en')."""
+    """Detect language across 10 supported languages (EN, PT, ES, ZH, JA, DE, FR, RU, KO, IT)."""
+    if not text:
+        return default
     lower = text.lower()
-    if any(c in lower for c in "çãõáéíóúâêôà"):
+
+    # 1. Non-Latin scripts
+    if any("\u0400" <= c <= "\u04ff" for c in lower):
+        return "ru"
+    if any(("\uac00" <= c <= "\ud7af") or ("\u1100" <= c <= "\u11ff") for c in lower):
+        return "ko"
+    if any(("\u3040" <= c <= "\u309f") or ("\u30a0" <= c <= "\u30ff") for c in lower):
+        return "ja"
+    if any("\u4e00" <= c <= "\u9fff" for c in lower):
+        return "zh"
+
+    # 2. Distinctive diacritics
+    if any(c in lower for c in "ñ¿¡"):
+        return "es"
+    if any(c in lower for c in "äöüß"):
+        return "de"
+    if any(c in lower for c in "œæëïù"):
+        return "fr"
+    if any(c in lower for c in "çãõ"):
         return "pt"
+
+    # 3. Lexical indicators for Latin scripts
     words = set(tokenize(lower))
-    pt_hits = len(words & _PT_INDICATORS)
-    en_hits = len(words & _EN_INDICATORS)
-    if pt_hits > en_hits:
+    scores = {
+        "pt": len(words & _PT_INDICATORS),
+        "en": len(words & _EN_INDICATORS),
+        "es": len(words & _ES_INDICATORS),
+        "fr": len(words & _FR_INDICATORS),
+        "de": len(words & _DE_INDICATORS),
+        "it": len(words & _IT_INDICATORS),
+    }
+    best_lang, best_score = max(scores.items(), key=lambda x: x[1])
+    if best_score > 0:
+        return best_lang
+
+    if any(c in lower for c in "áéíóúâêôà"):
         return "pt"
-    if en_hits > pt_hits:
-        return "en"
+
     return default
 
 
 def stem_token(tok: str, lang: Optional[str] = None) -> str:
-    pt, en = _get_stemmers()
-    if not pt or not en:
-        return tok.lower()
+    if not tok:
+        return ""
+    tok_lower = tok.lower()
+    if lang in ("zh", "ja", "ko"):
+        return tok_lower
     if len(tok) <= 3:
-        return tok.lower()
-    if lang == "pt":
-        return pt.stem(tok.lower())
-    if lang == "en":
-        return en.stem(tok.lower())
+        return tok_lower
+
+    if lang:
+        stemmer = _get_stemmer(lang)
+        if stemmer:
+            try:
+                return stemmer.stem(tok_lower)
+            except Exception:
+                return tok_lower
+        return tok_lower
+
+    # Fallback when lang is None
+    if any("\u0400" <= c <= "\u04ff" for c in tok_lower):
+        stemmer = _get_stemmer("ru")
+        if stemmer:
+            try:
+                return stemmer.stem(tok_lower)
+            except Exception:
+                pass
+        return tok_lower
 
     import unicodedata
     has_accent = any(
         unicodedata.category(c) == "Mn"
         for c in unicodedata.normalize("NFD", tok)
     )
-    if has_accent:
-        return pt.stem(tok.lower())
-    return en.stem(tok.lower())
+    pt_stemmer = _get_stemmer("pt")
+    en_stemmer = _get_stemmer("en")
+    if has_accent and pt_stemmer:
+        try:
+            return pt_stemmer.stem(tok_lower)
+        except Exception:
+            pass
+    elif en_stemmer:
+        try:
+            return en_stemmer.stem(tok_lower)
+        except Exception:
+            pass
+    return tok_lower
 
 
 
@@ -114,7 +243,7 @@ class BM25Index:
             self.avgdl = 0.0
             return
 
-        lang_counts = {"pt": 0, "en": 0}
+        lang_counts: Dict[str, int] = {}
         for i, text in enumerate(texts):
             lang = detect_language(text, default="pt")
             lang_counts[lang] = lang_counts.get(lang, 0) + 1
@@ -130,7 +259,10 @@ class BM25Index:
                 self.df[term] = self.df.get(term, 0) + 1
                 self.postings.setdefault(term, []).append((i, count))
 
-        self.corpus_lang = "pt" if lang_counts["pt"] >= lang_counts["en"] else "en"
+        if lang_counts:
+            self.corpus_lang = max(lang_counts.items(), key=lambda x: x[1])[0]
+        else:
+            self.corpus_lang = "pt"
         self.avgdl = sum(self.doc_len) / self.n
 
     def _idf(self, term: str) -> float:

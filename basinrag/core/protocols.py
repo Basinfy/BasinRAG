@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import AsyncGenerator, Protocol, runtime_checkable, Any, Dict, List, Optional, Sequence
+from typing import AsyncGenerator, Protocol, runtime_checkable, Any, Dict, List, Sequence
 
 
 @runtime_checkable

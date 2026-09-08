@@ -1,7 +1,7 @@
 """Meta-Basins Level 2: Cross-document attractor communities using NetworkX."""
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Any
 import numpy as np
 import networkx as nx
 from networkx.algorithms.community import greedy_modularity_communities

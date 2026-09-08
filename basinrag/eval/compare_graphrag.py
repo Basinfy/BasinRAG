@@ -10,17 +10,16 @@ Measures:
 from __future__ import annotations
 
 import os
-import sys
 import json
 import time
 import argparse
 from pathlib import Path
-from typing import List, Dict, Set, Any, Optional
+from typing import List, Dict, Any, Optional
 from collections import defaultdict
 
-from ..factory import BasinRAG, BasinRAGConfig
+from ..factory import BasinRAG
 from ..logging_config import setup_logging
-from .swebench import SWEBenchEvaluator, SWEBenchInstance, RepoWorkspaceManager, CodeRepoIngestor
+from .swebench import SWEBenchEvaluator, SWEBenchInstance, CodeRepoIngestor
 from .graphrag_baseline import GraphRAGBaseline
 
 logger = setup_logging()
@@ -118,9 +117,9 @@ class ComparativeBenchmarker:
         try:
             for repo_key, group in repo_groups.items():
                 first = group[0]
-                logger.info(f"\n========================================================")
+                logger.info("\n========================================================")
                 logger.info(f"Preparando Workspace para: {first.repo} ({len(group)} instâncias)")
-                logger.info(f"========================================================")
+                logger.info("========================================================")
 
                 repo_dir = self.evaluator.workspace.prepare_repo(first.repo, first.base_commit)
 
@@ -315,7 +314,7 @@ class ComparativeBenchmarker:
         g = summary["graphrag"]
 
         print("\n" + "=" * 76)
-        print(f"       RESULTADO COMPARATIVO OFICIAL: BASINRAG 2.0 vs GRAPHRAG")
+        print("       RESULTADO COMPARATIVO OFICIAL: BASINRAG 2.0 vs GRAPHRAG")
         print(f"       Total de Instâncias Avaliadas: {n} (SWE-bench Lite)")
         print("=" * 76)
         print(f"{'Métrica':<25} | {'GraphRAG':<20} | {'BasinRAG 2.0':<20} | {'Diferença':<10}")

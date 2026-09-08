@@ -86,14 +86,15 @@ class BasinSummarizer:
     async def _draft(self, texts: str) -> str:
         prompt = (
             "Você é um analista especialista em extração de informações.\n"
+            "IMPORTANTE: Você DEVE gerar o resumo estritamente no MESMO IDIOMA predominante dos textos fornecidos.\n"
             "Analise os seguintes textos de uma comunidade de documentos e crie um resumo estruturado no EXATO formato:\n\n"
-            "TÍTULO: [título curto]\n"
+            "TÍTULO: [título curto no idioma dos textos]\n"
             "TEMAS: [tema1, tema2, ...]\n"
             "ENTIDADES: [entidade1, entidade2, ...]\n"
-            "RESUMO: [2-3 frases detalhando o conteúdo exclusivo desta comunidade]\n\n"
+            "RESUMO: [2-3 frases detalhando o conteúdo exclusivo desta comunidade no mesmo idioma dos textos]\n\n"
             f"TEXTOS BRUTOS:\n{texts}"
         )
-        return await self.llm.generate("Siga o formato exigido rigorosamente.", prompt)
+        return await self.llm.generate("Siga o formato exigido rigorosamente e preserve o idioma original dos textos.", prompt)
 
     async def _critique(self, texts: str, draft: str) -> tuple[int, str]:
         prompt = (
@@ -111,13 +112,13 @@ class BasinSummarizer:
     async def _refine(self, texts: str, draft: str, critique: str) -> str:
         prompt = (
             "Melhore o DRAFT do resumo usando o FEEDBACK DO CRÍTICO.\n"
-            "Corrija os problemas apontados, mas MANTENHA EXATAMENTE o formato estruturado:\n"
+            "Corrija os problemas apontados, preserve rigorosamente o IDIOMA dos textos de origem, e MANTENHA EXATAMENTE o formato estruturado:\n"
             "TÍTULO: ...\nTEMAS: ...\nENTIDADES: ...\nRESUMO: ...\n\n"
             f"TEXTOS BRUTOS:\n{texts}\n\n"
             f"DRAFT ANTERIOR:\n{draft}\n\n"
             f"FEEDBACK DO CRÍTICO:\n{critique}"
         )
-        return await self.llm.generate("Aja como um editor final de altíssima qualidade.", prompt)
+        return await self.llm.generate("Aja como um editor final de altíssima qualidade mantendo o idioma dos textos.", prompt)
 
     async def summarize_basin(self, basin_id: str, verbose: bool = False) -> str:
         """Loop Agentic para resumir uma bacia: Draft -> (Critique -> Refine)."""

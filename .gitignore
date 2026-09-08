@@ -1,0 +1,39 @@
+# Runtime index (never commit embeddings / graph dumps / SQLite DBs)
+.basinrag/
+.basinrag.tmp-*/
+*.npz
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment and Secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Testing and Quality
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.deepeval/
+
+# Basinfy / IDE / OS
+.basinfy/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

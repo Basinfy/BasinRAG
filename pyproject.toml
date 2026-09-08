@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["basinrag*"]
+
+[project]
+name = "basinrag"
+version = "1.0.0-rc.1"
+description = "Topological RAG using Basins of Attraction"
+requires-python = ">=3.10"
+dependencies = [
+    "langchain>=0.1.13",
+    "langchain-community>=0.0.29",
+    "langchain-core>=0.1.33",
+    "sentence-transformers>=2.5.1",
+    "networkx>=3.2.1",
+    "numpy>=1.26.4",
+    "faiss-cpu>=1.8.0",
+    "pypdf>=4.1.0",
+    "langchain-text-splitters>=0.2.0",
+]
+
+[project.optional-dependencies]
+nlp = ["nltk>=3.8"]
+ollama = ["langchain-ollama>=0.1.0"]
+api = ["fastapi>=0.110", "uvicorn>=0.29", "slowapi>=0.1.9"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-cov>=4.1", "mypy>=1.9", "ruff>=0.3"]
+
+[project.scripts]
+basinrag = "basinrag.cli:main"
+

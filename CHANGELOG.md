@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### CLI & UX
 - **Flag de Versão**: Adicionado argumento `basinrag --version` no CLI.
 - **Encoding UTF-8**: Reconfiguração explícita de `sys.stdin` e `sys.stdout` para UTF-8.
+- **Licenciamento Open-Source (Apache 2.0)**: Migração oficial da licença para **Apache License, Version 2.0**, assegurando concessão e proteção de patentes para a comunidade e viabilizando o modelo de expansão Open-Core.
 - **Testes de Regressão**: Inclusão de `tests/test_audit_fixes.py` cobrindo 100% dos novos comportamentos (50 testes aprovados).
 
 ---

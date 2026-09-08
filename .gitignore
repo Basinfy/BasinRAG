@@ -39,6 +39,6 @@ htmlcov/
 Thumbs.db
 
 # Evaluation artifacts
-logs/run_evaluation/
+logs/
 gold.*.json
 

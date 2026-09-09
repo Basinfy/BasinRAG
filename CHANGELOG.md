@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2026-09-09
+
+### Mathematical Alignment & Formal Rigor
+- **Formalização do Operador de Contração/Predecessor $\phi$**: Ajustada a nomenclatura e a definição formal no paper LaTeX (`basinrag_paper.tex` e `basinrag_paper_pt.tex`) para caracterizar $\phi$ explicitamente como operador estrutural retrógrado de antecessor em direção ao atrator raiz da seção textual.
+- **Harmonização do Prior Topológico Exponencial**: Alinhada a formulação teórica em `docs/THEORY.md` com a cota convexa amortecida $\omega_{\min} = 0.70$ e taxa de decaimento $\lambda = 0.35$ estritamente congruente com o código-fonte (`retriever/fusion.py`).
+- **Extirpação de Jargão Espúrio ("Projeção de Cauchy")**: Removidas referências incorretas a Projeções e Atratores de Cauchy em `docs/BENCHMARK_COMPARISON_pt.md`, substituindo-as pelas definições matemáticas reais de representações métricas $L_2$ e particionamento determinístico por grafos funcionais.
+- **Formalização da Calibração Afim RRF & Mistura Afim PPR**: Documentadas formalmente nos papers a transformação afim de escala ($60 \times$) para o intervalo $[0, 1]$ e a combinação convexa pós-PPR ($0.6 \cdot \text{sim} + 0.4 \cdot \mathbf{p}$) aplicada às sementes antes do amortecimento por hops.
+- **Padronização MTEB / BEIR**: Atualização dos metadados de submissão oficial para `Basinfy/BasinRAG` e consolidação das diretrizes de publicação pública.
+
+---
+
 ## [1.0.3] - 2026-09-08
 
 ### Multilingual & Global Expansion (Top 10 Languages)

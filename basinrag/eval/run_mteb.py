@@ -1,5 +1,5 @@
 """
-Runner oficial do MTEB para BasinRAG 2.0.
+Runner oficial do MTEB para BasinRAG.
 Executa tarefas de Retrieval padronizadas (ex: SciFact) e gera
 os arquivos oficiais de submissão para o Hugging Face MTEB Leaderboard.
 """
@@ -27,7 +27,7 @@ logger = setup_logging()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Official MTEB Runner for BasinRAG 2.0")
+    parser = argparse.ArgumentParser(description="Official MTEB Runner for BasinRAG")
     parser.add_argument("--tasks", type=str, default="SciFact", help="Tarefas do MTEB separadas por vírgula (ex: SciFact)")
     parser.add_argument("--search-type", type=str, default="hybrid", help="Estratégia de busca do BasinRAG (hybrid, local, global)")
     parser.add_argument("--output", type=str, default="results/mteb", help="Diretório de saída dos resultados")

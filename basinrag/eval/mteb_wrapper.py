@@ -14,7 +14,7 @@ from mteb.models.model_meta import ModelMeta
 
 class BasinRAGMTEBWrapper:
     """
-    Wrapper para o MTEB (v2.20+) que implementa o SearchProtocol oficial para o BasinRAG 2.0.
+    Wrapper para o MTEB (v2.20+) que implementa o SearchProtocol oficial para o BasinRAG.
     """
     def __init__(self, rag_instance, search_type: str = "hybrid"):
         self.rag = rag_instance
@@ -115,15 +115,16 @@ class BasinRAGMTEBWrapper:
 
     @property
     def mteb_model_meta(self) -> ModelMeta:
+        from .. import __version__
         return ModelMeta(
-            name="alexmart1ns/BasinRAG-2.0",
-            revision="2.0.0",
-            release_date="2026-09-05",
+            name="Basinfy/BasinRAG",
+            revision=__version__,
+            release_date="2026-09-08",
             languages=["eng", "por"],
             framework=["PyTorch", "Sentence Transformers"],
             similarity_fn_name="cosine",
             use_instructions=False,
-            reference="https://github.com/alexmart1ns/BasinRAG",
+            reference="https://github.com/Basinfy/BasinRAG",
             license="mit",
             model_type=["hybrid"],
             loader=None,
@@ -132,7 +133,7 @@ class BasinRAGMTEBWrapper:
             max_tokens=512,
             embed_dim=384,
             open_weights=True,
-            public_training_code="https://github.com/alexmart1ns/BasinRAG",
+            public_training_code="https://github.com/Basinfy/BasinRAG",
             public_training_data=None,
             training_datasets=None,
         )

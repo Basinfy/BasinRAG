@@ -33,9 +33,9 @@ Introduzimos a função de profundidade topológica $h(v)$, representando a cont
 
 Para a agregação de score durante a fase Híbrida do BasinRAG, aplicamos o prior de suavização exponencial topológica:
 
-$$ S_{\text{topológico}} = \exp(-h(v) \cdot \lambda) $$
+$$ S_{\text{topológico}}(v) = S_{\text{RRF}}(v) \cdot \left( \omega_{\min} + (1 - \omega_{\min}) \cdot \exp(-h(v) \cdot \lambda) \right) $$
 
-**Justificativa Matemática:** A constante de decaimento $\lambda$ regula a taxa de penalização semântica por desvio da âncora central. Fragmentos dispersos no limiar de uma seção longa $h \gg 1$ requerem uma confiança vetorial crua $S_{\text{RRF}}$ substancialmente superior para superarem o prior da raiz $A_i$, onde $h(A_i) = 0$. Esse prior age como um regularizador bayesiano local contra fragmentação contextual e previne o Multi-hop Noise Drift.
+**Justificativa Matemática:** A constante de decaimento $\lambda = 0.35$ regula a taxa de atenuação semântica por desvio da âncora central, enquanto o piso convexo $\omega_{\min} = 0.70$ impede a anulação de evidências léxicas e semânticas cruciais situadas nas extremidades de seções extensas ($h \gg 1$). Fragmentos periféricos requerem uma confiança vetorial crua $S_{\text{RRF}}$ superior para superarem o prior da raiz $A_i$, onde $h(A_i) = 0$. Esse prior age como um regularizador bayesiano local contra fragmentação contextual e previne o *Multi-hop Noise Drift*.
 
 ## 4. Comparação Formal de Complexidade
 

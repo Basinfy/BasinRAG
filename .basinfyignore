@@ -1,0 +1,7 @@
+# Basinfy ignore file
+# Add directories or files that should not be indexed
+node_modules/
+dist/
+build/
+.git/
+assets/agents/

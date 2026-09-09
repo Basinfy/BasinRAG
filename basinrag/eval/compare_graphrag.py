@@ -314,10 +314,10 @@ class ComparativeBenchmarker:
         g = summary["graphrag"]
 
         print("\n" + "=" * 76)
-        print("       RESULTADO COMPARATIVO OFICIAL: BASINRAG 2.0 vs GRAPHRAG")
+        print("       RESULTADO COMPARATIVO OFICIAL: BASINRAG vs GRAPHRAG")
         print(f"       Total de Instâncias Avaliadas: {n} (SWE-bench Lite)")
         print("=" * 76)
-        print(f"{'Métrica':<25} | {'GraphRAG':<20} | {'BasinRAG 2.0':<20} | {'Diferença':<10}")
+        print(f"{'Métrica':<25} | {'GraphRAG':<20} | {'BasinRAG':<20} | {'Diferença':<10}")
         print("-" * 76)
 
         def diff_pct(vb, vg):

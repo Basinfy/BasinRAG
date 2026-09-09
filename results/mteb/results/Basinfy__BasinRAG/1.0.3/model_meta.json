@@ -1,8 +1,8 @@
 {
     "loader_kwargs": {},
-    "name": "alexmart1ns/BasinRAG-2.0",
-    "revision": "2.0.0",
-    "release_date": "2026-09-05",
+    "name": "Basinfy/BasinRAG",
+    "revision": "1.0.3",
+    "release_date": "2026-09-08",
     "languages": [
         "eng",
         "por"
@@ -15,13 +15,13 @@
     "embed_dim": 384,
     "license": "mit",
     "open_weights": true,
-    "public_training_code": "https://github.com/alexmart1ns/BasinRAG",
+    "public_training_code": "https://github.com/Basinfy/BasinRAG",
     "public_training_data": null,
     "framework": [
         "PyTorch",
         "Sentence Transformers"
     ],
-    "reference": "https://github.com/alexmart1ns/BasinRAG",
+    "reference": "https://github.com/Basinfy/BasinRAG",
     "similarity_fn_name": "cosine",
     "use_instructions": false,
     "training_datasets": null,

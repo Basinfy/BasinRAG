@@ -1,5 +1,5 @@
 """
-Official BEIR Comparative Benchmark: BasinRAG 2.0 vs GraphRAG.
+Official BEIR Comparative Benchmark: BasinRAG vs GraphRAG.
 Evaluates using the official BEIR framework (EvaluateRetrieval) on SciFact.
 Metrics:
 - NDCG@{1, 5, 10}
@@ -31,7 +31,7 @@ logger = setup_logging()
 class BEIRComparativeBenchmarker:
     """
     Executa o benchmark empírico comparativo oficial do BEIR
-    (BasinRAG 2.0 vs GraphRAG) sob condições 100% idênticas e imparciais.
+    (BasinRAG vs GraphRAG) sob condições 100% idênticas e imparciais.
     """
     def __init__(self, cache_dir: str = ".basinrag/eval_cache"):
         self.cache_dir = cache_dir
@@ -64,9 +64,9 @@ class BEIRComparativeBenchmarker:
         logger.info(f"Dataset carregado: {len(corpus)} documentos no corpus | {len(eval_queries)} queries a avaliar.")
 
         # ---------------------------------------------------------
-        # 1. Construção do Índice BasinRAG 2.0
+        # 1. Construção do Índice BasinRAG
         # ---------------------------------------------------------
-        logger.info("\n[1/4] Construindo Índice BasinRAG 2.0 (Topological Basins + FAISS + BM25)...")
+        logger.info("\n[1/4] Construindo Índice BasinRAG (Topological Basins + FAISS + BM25)...")
         rag = BasinRAG.create(storage_dir=f".basinrag/eval_beir_{dataset_name}")
         t0_basin_build = time.perf_counter()
         n_nodes = ingest_beir_corpus(rag, corpus)
@@ -86,7 +86,7 @@ class BEIRComparativeBenchmarker:
         # ---------------------------------------------------------
         # 3. Execução de Busca BasinRAG
         # ---------------------------------------------------------
-        logger.info("\n[3/4] Executando queries no BasinRAG 2.0...")
+        logger.info("\n[3/4] Executando queries no BasinRAG...")
         adapter = BasinRAGBEIRAdapter(rag)
         t0_basin_search = time.perf_counter()
         basin_results = adapter.search_beir(eval_queries, top_k=top_k, search_type="hybrid")
@@ -157,10 +157,10 @@ class BEIRComparativeBenchmarker:
         nd = summary["num_docs"]
 
         print("\n" + "=" * 78)
-        print(f"      BENCHMARK OFICIAL BEIR: BASINRAG 2.0 vs GRAPHRAG ({ds.upper()})")
+        print(f"      BENCHMARK OFICIAL BEIR: BASINRAG vs GRAPHRAG ({ds.upper()})")
         print(f"      Corpus: {nd} documentos | Queries Avaliadas: {nq} | Evaluator: BEIR")
         print("=" * 78)
-        print(f"{'Métrica BEIR Oficial':<26} | {'GraphRAG':<18} | {'BasinRAG 2.0':<18} | {'Diferença':<10}")
+        print(f"{'Métrica BEIR Oficial':<26} | {'GraphRAG':<18} | {'BasinRAG':<18} | {'Diferença':<10}")
         print("-" * 78)
 
         def diff_pct(vb, vg):

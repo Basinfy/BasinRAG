@@ -41,4 +41,5 @@ Thumbs.db
 # Evaluation artifacts
 logs/
 gold.*.json
+results/mteb/remote/
 

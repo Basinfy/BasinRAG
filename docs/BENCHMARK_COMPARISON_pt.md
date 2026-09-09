@@ -14,7 +14,7 @@ O **BasinRAG** é uma arquitetura de RAG topológica fundamentada na teoria de *
 ### Principais Destaques Frente ao Cenário Global:
 1. **Comparativo com Abordagens de Grafo de Conhecimento:** Em relação ao baseline GraphRAG, o BasinRAG registrou **+142,5% em NDCG@10** e **+217,8% em MRR@10** no benchmark SciFact (BEIR), com tempo de construção de índice **3,05x menor** e latência de busca **4,43x inferior**.
 2. **Eficiência Paramétrica Extrema:** Utilizando um encoder de apenas **22 milhões de parâmetros** (`all-MiniLM-L6-v2`), o BasinRAG atingiu **0.650 de NDCG@10** e **0.629 de MRR@10** no MTEB (300 queries completas, $top\_k=1000$), rivalizando com modelos densos de 300M+ parâmetros e superando modelos comerciais de 1536 dimensões sem enriquecimento topológico.
-3. **Indexação Local sem Dependência de LLM ($0.00):** Enquanto abordagens baseadas em extração contínua de entidades e resumos comunitários demandam sucessivas chamadas a modelos de linguagem na etapa de ingestão, o BasinRAG realiza a partição topológica via Projeção de Cauchy e componentes funcionais de forma estritamente matemática e local em menos de 100 segundos.
+3. **Indexação Local sem Dependência de LLM ($0.00):** Enquanto abordagens baseadas em extração contínua de entidades e resumos comunitários demandam sucessivas chamadas a modelos de linguagem na etapa de ingestão, o BasinRAG realiza a partição topológica via representações métricas $L_2$ e componentes funcionais determinísticos de forma estritamente matemática e local em menos de 100 segundos.
 4. **Precisão em Engenharia de Software (SWE-bench):** O índice topológico de bacias dobrou a taxa de acerto no topo (**Hit@1 subiu de 15,4% para 30,8%**) e alcançou **84,6% de Hit@10** na localização de arquivos com bugs em bases de código de grande porte.
 
 ---
@@ -56,7 +56,7 @@ graph TD
     end
 
     subgraph "Paradigma Topológico Funcional (BasinRAG)"
-        B1["Ingestão de Textos"] --> B2["Embedding 384d + Projeção Cauchy<br>(Determinístico, Custo Zero)"]
+        B1["Ingestão de Textos"] --> B2["Embedding 384d L2 + Grafo Funcional<br>(Determinístico, Custo Zero)"]
         B2 --> B3["Decomposição de Bacias Funcionais<br>(Componentes fortemente conexos em O(V+E))"]
         B3 --> B4["Multi-Level Condensation (L0-L3)<br>(Topological Hop Prior)"]
         B4 --> B5["Busca Híbrida RRF + Cross-Encoder<br>(Latência: 2.506ms | NDCG: 0.771)"]
@@ -123,6 +123,6 @@ Em bases de código reais de repositórios open-source do GitHub (`flask`, `requ
 
 ## 6. Conclusões e Recomendações Estratégicas
 
-1. **Eficiência Arquitetural:** Os experimentos demonstram que a modelagem via propriedades topológicas discretas (bacias de atração e atratores de Cauchy) oferece uma alternativa consistente frente a pipelines de extração extensiva por LLMs, viabilizando alta precisão de recuperação com processamento estritamente local e determinístico.
-2. **Pronto para Submissão ao MTEB Hugging Face:** Com o pacote completo gerado em `results/mteb/results/alexmart1ns__BasinRAG-2.0/2.0.0/`, o projeto dispõe de todos os metadados e predições oficiais prontos para Pull Request no repositório oficial do MTEB (`embeddings-benchmark/mteb`).
+1. **Eficiência Arquitetural:** Os experimentos demonstram que a modelagem via propriedades topológicas discretas (bacias de atração e atratores estruturais determinísticos) oferece uma alternativa consistente frente a pipelines de extração extensiva por LLMs, viabilizando alta precisão de recuperação com processamento estritamente local e determinístico.
+2. **Pronto para Submissão ao MTEB Hugging Face:** Com o pacote completo gerado em `results/mteb/results/Basinfy__BasinRAG/1.0.3/`, o projeto dispõe de todos os metadados e predições oficiais prontos para Pull Request no repositório oficial de resultados do MTEB (`embeddings-benchmark/results`).
 3. **Diretriz de Otimização Futura de Latência no MTEB:** Como validado durante a execução de 3h50m, restringir o reranking de Cross-Encoder aos **Top-100 candidatos recuperados** no Stage 1 reduz a latência da bateria completa de 3h50m para menos de **5 minutos**, mantendo o NDCG@10 e o MRR@10 rigorosamente idênticos.

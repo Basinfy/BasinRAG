@@ -73,16 +73,34 @@ Executamos a avaliação oficial com a biblioteca `mteb` v2.20.5 cobrindo **toda
 * **Tempo Total de Execução**: 3h 50m (300 queries x 4.000 nós avaliados na CPU)
 
 ### Arquivos Oficiais Gerados para Submissão
-O runner oficial do MTEB gerou a estrutura de pastas exata exigida pelo Hugging Face:
-- 📁 `results/mteb/results/alexmart1ns__BasinRAG-2.0/2.0.0/SciFact.json`
-- 📁 `results/mteb/results/alexmart1ns__BasinRAG-2.0/2.0.0/model_meta.json`
-- 📁 `results/mteb/SciFact_predictions.json`
+O runner oficial do MTEB gerou a estrutura exata exigida pelo Hugging Face e pelo benchmark:
+- 📁 `results/mteb/results/Basinfy__BasinRAG/1.0.3/SciFact.json` (Métricas oficiais da tarefa)
+- 📁 `results/mteb/results/Basinfy__BasinRAG/1.0.3/model_meta.json` (Metadados estruturados Pydantic)
+- 📁 `results/mteb/mteb_metadata.md` (Metadados YAML frontmatter gerados conforme [huggingface.co/blog/mteb](https://huggingface.co/blog/mteb))
+- 📁 `results/mteb/SciFact_predictions.json` (Dump bruto de predições e scores)
 
-### Como Submeter ao Leaderboard do Hugging Face:
-1. Faça o fork do repositório oficial do MTEB: `https://github.com/embeddings-benchmark/mteb`
-2. Copie a pasta `results/alexmart1ns__BasinRAG-2.0/` para o diretório `results/` do fork.
+### Ritos Oficiais de Submissão ao Leaderboard (Hugging Face & MTEB):
+
+Conforme documentado no artigo oficial do Hugging Face ([MTEB: Massive Text Embedding Benchmark](https://huggingface.co/blog/mteb)), existem dois ritos complementares para ranqueamento público:
+
+#### Rito 1: Publicação via Metadados no Hugging Face Hub (Recomendado & Automático)
+O leaderboard do Hugging Face rastreia modelos no Hub que possuem a tag `mteb` e um `model-index` estruturado no frontmatter do seu `README.md`:
+1. Gerar o arquivo de metadados atualizado a qualquer momento:
+   ```powershell
+   python -m basinrag.eval.generate_mteb_metadata
+   ```
+2. Abra o repositório do modelo no Hugging Face Hub (`https://huggingface.co/Basinfy/BasinRAG`).
+3. Copie o bloco YAML contido em `results/mteb/mteb_metadata.md` e cole-o no topo do arquivo `README.md` (antes de qualquer conteúdo textual).
+4. Faça commit no Hub. O [MTEB Leaderboard](https://huggingface.co/spaces/mteb/leaderboard) fará o crawling do seu model card e exibirá as métricas automaticamente!
+
+#### Rito 2: Pull Request no Repositório do MTEB (Inclusão no Cache Estático Oficial)
+1. Faça o fork do repositório oficial de resultados do MTEB: `https://github.com/embeddings-benchmark/results`
+2. Clone seu fork e copie a pasta de resultados (atenção: nunca envie predições brutas pesadas):
+   ```bash
+   cp -r results/mteb/results/Basinfy__BasinRAG/ results/
+   ```
 3. Abra um Pull Request com o título: `[Model] Add BasinRAG results on SciFact`.
-4. Uma vez mergeado pelos mantenedores, o **BasinRAG** aparecerá na tabela pública do MTEB!
+4. Uma vez mergeado pelos mantenedores do MTEB, o **BasinRAG** passa a constar no histórico estático do leaderboard!
 
 ---
 

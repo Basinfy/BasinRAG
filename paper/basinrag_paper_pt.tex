@@ -81,12 +81,12 @@ Na etapa de consulta, um roteador adaptativo de intenção determina a estratég
 
 Considere um documento $\mathcal{D}$ segmentado sequencialmente em fragmentos discursivos ordenados $V = \{v_1, v_2, \dots, v_n\}$.
 
-\begin{definition}[Operador Sucessor Determinístico]
+\begin{definition}[Operador Predecessor Estrutural Determinístico]
 Um grafo direcionado $G = (V, E)$ é caracterizado como um \textit{Grafo Funcional Discreto} se todo vértice possui grau de saída no máximo unitário ($\deg^+(v) \le 1$), definido pela aplicação unívoca:
 \begin{equation}
 \phi: V \to V \cup \{\emptyset\}
 \end{equation}
-em que $\phi(v)$ identifica o predecessor estrutural imediato de $v$ na esteira discursiva do autor.
+em que $\phi(v)$ identifica o predecessor estrutural imediato de $v$ na esteira discursiva do autor, orientando o fluxo determinístico em direção à âncora raiz (sumidouro) da seção.
 \end{definition}
 
 Em documentos com formatação estática, $\phi(v_i) = v_{i-1}$ para nós de uma mesma seção. Para contemplar transições discursivas dinâmicas, incorporamos um \textit{operador de quebras adaptativas}. Seja $\mathbf{e}_i \in \mathbb{R}^d$ o vetor normalizado do nó $v_i$. O conjunto de quebras $\mathcal{S} \subset \{1, \dots, n\}$ é disparado por:
@@ -231,7 +231,7 @@ Para privilegiar nós estruturalmente centrais sem suprimir evidências léxicas
 \begin{equation}
 S_{\text{final}}(v) = S_{\text{RRF}}(v) \cdot \left( \omega_{\min} + (1 - \omega_{\min}) \cdot e^{-\lambda \cdot h(v)} \right)
 \end{equation}
-Os candidatos de topo são reclassificados por um Cross-Encoder multilíngue mMARCO antes da composição final do prompt.
+Para interfaces de consulta externas, os escores são calibrados afinmente para o intervalo unitário via $S_{\text{calibrado}}(v) = \min(1,0, \, k \cdot S_{\text{final}}(v))$. Os candidatos de topo são reclassificados por um Cross-Encoder multilíngue mMARCO antes da composição final do prompt.
 
 \subsection{Difusão Espectral Local (PPR com Conservação)}
 
@@ -239,7 +239,14 @@ Em consultas altamente localizadas intra-bacia, o sistema induz o subgrafo $G[\m
 \begin{equation}
 \mathbf{p}^{(t+1)} = \alpha_{\text{ppr}} \mathbf{M} \mathbf{p}^{(t)} + (1 - \alpha_{\text{ppr}}) \mathbf{v}
 \end{equation}
-com $\alpha_{\text{ppr}} = 0,85$. O confinamento estrito da difusão à bacia induzida impede que a massa de probabilidade seja desviada por nós externos.
+com $\alpha_{\text{ppr}} = 0,85$. O confinamento estrito da difusão à bacia induzida impede que a massa de probabilidade seja desviada por nós externos. Ao convergir, o vetor estacionário é combinado com a similaridade densa de entrada $\text{sim}(v)$ por uma mistura afim:
+\begin{equation}
+S_{\text{difundido}}(v) = \begin{cases}
+(0,6 \cdot \text{sim}(v) + 0,4 \cdot \mathbf{p}(v)) \cdot \psi(h(v)), & \text{se } v \in \text{sementes} \\
+(0,5 \cdot \mathbf{p}(v)) \cdot \psi(h(v)), & \text{caso contrário}
+\end{cases}
+\end{equation}
+em que $\psi(h) = \omega_{\min} + (1 - \omega_{\min}) e^{-\lambda h}$.
 
 \subsection{Meta-Bacias Nível 2 (Inter-Documentos)}
 

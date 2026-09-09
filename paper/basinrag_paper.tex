@@ -76,12 +76,12 @@ During query execution, an adaptive router identifies query scope, activating ei
 
 Let $\mathcal{D}$ denote a document represented as an ordered sequence of contiguous informational segments (chunks) $V = \{v_1, v_2, \dots, v_n\}$.
 
-\begin{definition}[Deterministic Successor Operator]
+\begin{definition}[Deterministic Predecessor (Contraction) Operator]
 A directed graph $G = (V, E)$ is defined as a \textit{Discrete Functional Graph} if every node has an out-degree of at most one, characterized by a single-valued mapping:
 \begin{equation}
 \phi: V \to V \cup \{\emptyset\}
 \end{equation}
-where $\phi(v)$ designates the immediate structural predecessor of $v$ along the authorial discourse trajectory.
+where $\phi(v)$ designates the immediate structural predecessor of $v$ along the discourse trajectory, directing flow backwards toward the root anchor (sink) of the section.
 \end{definition}
 
 In static segmentation, $\phi(v_i) = v_{i-1}$ for indices within the same logical section. To accommodate variable discourse transitions, we introduce an \textit{adaptive boundary operator}. Let $\mathbf{e}_i \in \mathbb{R}^d$ be the normalized latent representation of $v_i$. A boundary set $\mathcal{S} \subset \{1, \dots, n\}$ is defined by:
@@ -226,7 +226,7 @@ To prioritize structurally central nodes without discarding long-tail text match
 \begin{equation}
 S_{\text{topological}}(v) = S_{\text{RRF}}(v) \cdot \left( \omega_{\min} + (1 - \omega_{\min}) \cdot e^{-\lambda \cdot h(v)} \right)
 \end{equation}
-Top candidate passages undergo cross-encoder re-ranking using multilingual mMARCO models to construct the final prompt context.
+For downstream retrieval interfaces, scores are affinely calibrated to the unit interval via $S_{\text{calibrated}}(v) = \min(1.0, \, k \cdot S_{\text{topological}}(v))$. Top candidate passages undergo cross-encoder re-ranking using multilingual mMARCO models to construct the final prompt context.
 
 \subsection{Local Intra-Basin Spectral Diffusion}
 
@@ -234,7 +234,14 @@ For queries targeted at detailed section contexts, BasinRAG extracts the induced
 \begin{equation}
 \mathbf{p}^{(t+1)} = \alpha_{\text{ppr}} \mathbf{M} \mathbf{p}^{(t)} + (1 - \alpha_{\text{ppr}}) \mathbf{v}
 \end{equation}
-where $\mathbf{M}$ is the row-stochastic adjacency matrix of the induced subgraph, and $\alpha_{\text{ppr}} = 0.85$. Confinement to the induced subgraph guarantees that spectral energy does not disperse across unrelated document modules.
+where $\mathbf{M}$ is the row-stochastic adjacency matrix of the induced subgraph, and $\alpha_{\text{ppr}} = 0.85$. Confinement to the induced subgraph guarantees that spectral energy does not disperse across unrelated document modules. Upon convergence, stationary mass is combined with entrypoint dense similarity $\text{sim}(v)$ via an affine mixture:
+\begin{equation}
+S_{\text{diffused}}(v) = \begin{cases}
+(0.6 \cdot \text{sim}(v) + 0.4 \cdot \mathbf{p}(v)) \cdot \psi(h(v)), & \text{if } v \in \text{seeds} \\
+(0.5 \cdot \mathbf{p}(v)) \cdot \psi(h(v)), & \text{otherwise}
+\end{cases}
+\end{equation}
+where $\psi(h) = \omega_{\min} + (1 - \omega_{\min}) e^{-\lambda h}$.
 
 \subsection{Inter-Document Meta-Basins (Level 2)}
 

@@ -7,7 +7,7 @@ logger = setup_logging()
 class CrossEncoderReranker:
     """Cross-encoder reranker (defaults to BAAI/bge-reranker-v2-m3); skip when the model cannot load."""
 
-    def __init__(self, model_name: str = "BAAI/bge-reranker-v2-m3", max_length: int = 256):
+    def __init__(self, model_name: str = "BAAI/bge-reranker-v2-m3", max_length: int = 512):
         self.model_name = model_name
         self.max_length = max_length
         self._model = None

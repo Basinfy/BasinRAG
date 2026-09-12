@@ -1,32 +1,38 @@
 # Índice Geral da Documentação do BasinRAG
 
-Bem-vindo à documentação oficial do **BasinRAG**, o sistema avançado de Geração Aumentada por Recuperação (RAG) impulsionado por Análise Topológica de Dados.
+**BasinRAG:** RAG híbrido **BM25 + FAISS** com bacias como **mapa de briefing**.  
+Visão geral: [README](../README_pt.md) · Números: [`BENCHMARKS.md`](../BENCHMARKS.md).
 
-Este índice serve como o ponto central para explorar todos os manuais, referências e guias do projeto. Escolha o guia mais adequado ao seu perfil e necessidade atual.
+## Navegação rápida
 
-## Navegação Rápida
+| Guia | Descrição | Público |
+|------|-----------|---------|
+| [Quickstart](QUICKSTART.md) | Instalar, ingest, query, chat | Desenvolvedores |
+| [README](../README_pt.md) | Visão do produto | Todos |
+| [Benchmarks](../BENCHMARKS.md) | SciFact, long-doc, SWE-bench | ML / pesquisa |
+| [Comparativo de paradigmas](BENCHMARK_COMPARISON_pt.md) | Dense / GraphRAG-class / BasinRAG | Arquitetos |
+| [Arquitetura](../ARCHITECTURE.md) | Pipelines de ingestão e retrieval | Engenheiros |
+| [Teoria](THEORY.md) | φ, atratores, bacias, ρ | Pesquisadores |
+| [API](API_REFERENCE.md) | SDK, config, REST / WebSocket | Backend |
+| [Deploy](DEPLOYMENT.md) | Produção | DevOps |
+| [Multilíngue](MULTILINGUAL.md) | Stemmers / cross-lingual | IA |
+| [Exemplo de bacias](exemplo_bacias.md) | Walkthrough de topologia | Curiosos |
+| [Auditoria](../AUDIT_REPORT.md) | Auditoria | Mantenedores |
+| [Arquivo v1.0.0](archive/AUDIT_REPORT_v1.0.0.md) | Auditoria histórica | Mantenedores |
 
-| Guia | Descrição | Público-Alvo |
-|------|-----------|--------------|
-| [🚀 Quickstart](QUICKSTART.md) | Guia prático e direto para instalar, configurar e rodar sua primeira query e chat interativo. | Desenvolvedores, Novos Usuários |
-| [🧠 Fundamentação Teórica](THEORY.md) | Detalhes sobre Atração Topológica, Particionamento de Bacias e Grafo de Vizinhança. | Pesquisadores, Cientistas de Dados |
-| [🏗️ Especificação Arquitetural](../ARCHITECTURE.md) | Visão aprofundada da engenharia do sistema, pipelines de ingestão e recuperação. | Arquitetos, Engenheiros de Software |
-| [📊 Benchmarks Oficiais](../BENCHMARKS.md) | Métricas de precisão, recall e latência em comparação com abordagens tradicionais. | Engenheiros de Machine Learning |
-| [🌐 Relatório Comparativo Global](BENCHMARK_COMPARISON_pt.md) | Estudo comparativo com GraphRAG, HippoRAG, OpenAI e baselines globais MTEB. | Arquitetos, Pesquisadores |
-| [🔍 Relatório de Auditoria Histórica (v1.0.0)](archive/AUDIT_REPORT_v1.0.0.md) | Diagnóstico completo de segurança, performance, consistência matemática e endurecimento. | Mantenedores, Auditores |
-| [📚 Referência de API](API_REFERENCE.md) | Documentação completa de todas as classes, métodos, configurações e endpoints REST/WebSocket. | Desenvolvedores Back-end |
-| [⚙️ Guia de Implantação](DEPLOYMENT.md) | Manual de engenharia para colocar o BasinRAG em ambiente produtivo, escalabilidade e segurança. | DevOps, SREs, SysAdmins |
-| [🌐 Arquitetura Multilíngue](MULTILINGUAL.md) | Guia de recuperação cross-lingual, stemmers dos 10 principais idiomas e re-ranking mMARCO. | Engenheiros de IA, Arquitetos |
-| [💧 Exemplo Prático de Bacias](exemplo_bacias.md) | Walkthrough de como a topologia atua em um corpus de teste. | Analistas, Curiosos |
+## Mapa de leitura
 
-## Mapa de Leitura Sugerido
+### Desenvolvedores
+1. [Quickstart](QUICKSTART.md)  
+2. [API](API_REFERENCE.md)  
+3. [Deploy](DEPLOYMENT.md)
 
-### Para Desenvolvedores e Engenheiros
-1. Inicie pelo **[Quickstart](QUICKSTART.md)** para colocar o sistema no ar rapidamente.
-2. Explore a **[Referência de API](API_REFERENCE.md)** para integrar o BasinRAG às suas aplicações via SDK Python ou REST.
-3. Leia o **[Guia de Implantação](DEPLOYMENT.md)** antes de mover sua aplicação para produção.
+### Métricas e posicionamento
+1. [README](../README_pt.md)  
+2. [Benchmarks](../BENCHMARKS.md)  
+3. [Comparativo](BENCHMARK_COMPARISON_pt.md)
 
-### Para Pesquisadores e Cientistas
-1. Comece pela **[Fundamentação Teórica](THEORY.md)** para entender os conceitos matemáticos que baseiam nosso algoritmo.
-2. Analise os **[Benchmarks Oficiais](../BENCHMARKS.md)** para avaliar ganhos reais em topologias não-lineares.
-3. Teste o **[Exemplo Prático](exemplo_bacias.md)** para visualizar o comportamento real dos atratores.
+### Teoria e estrutura
+1. [Teoria](THEORY.md)  
+2. [Arquitetura](../ARCHITECTURE.md)  
+3. [Exemplo de bacias](exemplo_bacias.md)

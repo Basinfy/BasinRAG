@@ -54,8 +54,8 @@ class BasinIngestor:
     def __init__(
         self,
         model_name: str = "paraphrase-multilingual-MiniLM-L12-v2",
-        chunk_size: int = 1000,
-        chunk_overlap: int = 100,
+        chunk_size: int = 512,
+        chunk_overlap: int = 128,
     ):
         _patch_torch_dtensor()
         from sentence_transformers import SentenceTransformer
@@ -83,10 +83,15 @@ class BasinIngestor:
             show_progress_bar=len(texts) > 100,
         )
         nodes = []
+        n = len(texts)
         for i, (txt, emb) in enumerate(zip(texts, embeddings)):
             layers = node_layers(txt)
-            meta = (metadata_list[i] if metadata_list else {}) or {}
+            meta = dict((metadata_list[i] if metadata_list else {}) or {})
             meta["doc_id"] = meta.get("doc_id") or source
+            meta["role"] = "child"
+            # Parent context = local window (±1 chunk); retrieved at brief time via neighbors.
+            meta["parent_span"] = [max(0, i - 1), min(n - 1, i + 1)]
+            meta["parent_doc"] = source
             nodes.append({
                 "id": make_node_id(source, i, txt),
                 "text": txt,

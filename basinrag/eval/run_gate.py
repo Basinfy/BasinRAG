@@ -71,7 +71,7 @@ def load_qasper(max_papers: Optional[int], max_queries: Optional[int]) -> Tuple[
         raise RuntimeError("datasets is required for the gate (`pip install datasets`)") from exc
 
     try:
-        ds = load_dataset("allenai/qasper", split="validation", trust_remote_code=True)
+        ds = load_dataset("allenai/qasper", split="validation")
     except Exception as first_err:
         print(f"[gate] allenai/qasper failed ({first_err}); trying arxiv long-doc fallback")
         return load_arxiv_longdoc(max_papers, max_queries)
@@ -378,9 +378,13 @@ def main():
         try:
             corpus, queries, qrels = load_qasper(args.max_papers, args.max_long_queries)
             queries, qrels = _limit_queries(queries, qrels, args.max_long_queries)
+            # Isolate storage by corpus family so QASPER cache is never reused for arxiv fallback.
+            sample_id = next(iter(corpus), "")
+            longdoc_tag = "arxiv" if str(sample_id).startswith("arxiv") else "qasper"
+            longdoc_storage = str(root / ".basinrag" / f"gate_{longdoc_tag}")
             longdoc = run_corpus(
-                "QASPER",
-                str(root / ".basinrag" / "gate_qasper"),
+                longdoc_tag.upper(),
+                longdoc_storage,
                 args.encoder,
                 args.reranker,
                 corpus,
@@ -394,10 +398,14 @@ def main():
                 enable_rerank=enable_rerank,
                 force_reindex=args.force_reindex,
             )
-            payload["qasper"] = {"n_docs": len(corpus), **longdoc}
+            payload[longdoc_tag] = {"n_docs": len(corpus), **longdoc}
+            # Keep legacy key for decide()/consumers that expect "qasper".
+            payload["qasper"] = payload[longdoc_tag]
             long_metrics = longdoc["metrics"]
             long_basins = longdoc["basins"]
-            write_json(out / "qasper.json", payload["qasper"])
+            write_json(out / f"{longdoc_tag}.json", payload[longdoc_tag])
+            if longdoc_tag != "qasper":
+                write_json(out / "qasper.json", payload["qasper"])
         except Exception as exc:
             payload["qasper_error"] = str(exc)
             print(f"[gate] long-doc failed: {exc}")

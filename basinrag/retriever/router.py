@@ -4,7 +4,7 @@ import re
 
 
 class IntelligentQueryRouter:
-    """Overview → global; everything else hybrid. Substring traps like 'quais são' do not fire."""
+    """Overview → global; detail/context → local; everything else hybrid."""
 
     OVERVIEW_PHRASES = (
         # PT
@@ -72,6 +72,13 @@ class IntelligentQueryRouter:
         # KO
         "공통점", "차이점", "비교",
     )
+    # Detail / neighborhood questions → local basin+PPR path
+    LOCAL_PHRASES = (
+        "neste parágrafo", "neste capitulo", "neste capítulo", "nessa seção", "nessa secao",
+        "contexto imediato", "trecho sobre", "passagem sobre", "ao redor de",
+        "in this paragraph", "in this section", "nearby context", "surrounding text",
+        "in this chapter", "local context", "passage about",
+    )
     FILLER = {
         # PT
         "deste", "desta", "livro", "texto", "artigo", "documento",
@@ -105,6 +112,9 @@ class IntelligentQueryRouter:
 
         if q_bare in cls.OVERVIEW_WORDS or q_bare in cls.OVERVIEW_PHRASES:
             return "global"
+
+        if any(p in q for p in cls.LOCAL_PHRASES):
+            return "local"
 
         is_cjk = any("\u4e00" <= c <= "\u9fff" or "\u3040" <= c <= "\u30ff" or "\uac00" <= c <= "\ud7af" for c in q)
         if n <= 3 or (is_cjk and len(q) <= 12):
@@ -141,6 +151,7 @@ class IntelligentQueryRouter:
     _encoder = None
     _global_centroid: Optional[np.ndarray] = None
     _hybrid_centroid: Optional[np.ndarray] = None
+    _local_centroid: Optional[np.ndarray] = None
 
     @classmethod
     def train_centroids(cls, encoder):
@@ -170,12 +181,20 @@ class IntelligentQueryRouter:
             "в каком году произошло это событие", "钠的熔点是多少度",
             "電子を発見したのは誰ですか", "구리의 녹는점은 얼마입니까",
         ]
+        local_examples = [
+            "neste parágrafo o que significa", "contexto imediato deste trecho",
+            "in this section what does it say about", "passage about the method nearby",
+            "ao redor desta menção qual é o argumento", "local context of this claim",
+        ]
         g_embs = encoder.encode(global_examples, normalize_embeddings=True)
         h_embs = encoder.encode(hybrid_examples, normalize_embeddings=True)
+        l_embs = encoder.encode(local_examples, normalize_embeddings=True)
         cls._global_centroid = np.mean(g_embs, axis=0)
         cls._global_centroid /= np.linalg.norm(cls._global_centroid) + 1e-10
         cls._hybrid_centroid = np.mean(h_embs, axis=0)
         cls._hybrid_centroid /= np.linalg.norm(cls._hybrid_centroid) + 1e-10
+        cls._local_centroid = np.mean(l_embs, axis=0)
+        cls._local_centroid /= np.linalg.norm(cls._local_centroid) + 1e-10
 
     @classmethod
     def route_with_embeddings(cls, query: str) -> str:
@@ -185,9 +204,14 @@ class IntelligentQueryRouter:
             return regex_result
         if len(query.split()) < 4:
             return regex_result
+        if regex_result in ("global", "local"):
+            return regex_result
         q_emb = cls._encoder.encode(query, normalize_embeddings=True)
         sim_global = float(np.dot(q_emb, cls._global_centroid))
         sim_hybrid = float(np.dot(q_emb, cls._hybrid_centroid))
-        if sim_global > sim_hybrid + 0.05:
+        sim_local = float(np.dot(q_emb, cls._local_centroid)) if cls._local_centroid is not None else -1.0
+        if sim_global > sim_hybrid + 0.05 and sim_global >= sim_local:
             return "global"
+        if sim_local > sim_hybrid + 0.05 and sim_local > sim_global:
+            return "local"
         return "hybrid"

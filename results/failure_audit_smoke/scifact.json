@@ -1,0 +1,113 @@
+{
+  "corpus": "scifact",
+  "flat_index": true,
+  "summary": {
+    "n_queries": 40,
+    "stage_hit_rate@10": {
+      "bm25": 0.9,
+      "dense": 0.925,
+      "rrf": 0.925,
+      "hop": 0.925,
+      "ce": 0.925
+    },
+    "stage_mean_recall@10": {
+      "bm25": 0.86,
+      "dense": 0.9075,
+      "rrf": 0.9012499999999999,
+      "hop": 0.9075,
+      "ce": 0.9075
+    },
+    "drop_heatmap": {
+      "never_retrieved": 2,
+      "none": 36,
+      "rrf": 1,
+      "dense": 1
+    }
+  },
+  "samples": [
+    {
+      "stage_hit": {
+        "bm25": false,
+        "dense": false,
+        "rrf": false,
+        "hop": false,
+        "ce": false
+      },
+      "stage_recall": {
+        "bm25": 0.0,
+        "dense": 0.0,
+        "rrf": 0.0,
+        "hop": 0.0,
+        "ce": 0.0
+      },
+      "drop_at": "never_retrieved",
+      "n_relevant": 1,
+      "qid": "1"
+    },
+    {
+      "stage_hit": {
+        "bm25": false,
+        "dense": true,
+        "rrf": false,
+        "hop": false,
+        "ce": false
+      },
+      "stage_recall": {
+        "bm25": 0.0,
+        "dense": 1.0,
+        "rrf": 0.0,
+        "hop": 0.0,
+        "ce": 0.0
+      },
+      "drop_at": "rrf",
+      "n_relevant": 1,
+      "qid": "13"
+    },
+    {
+      "stage_hit": {
+        "bm25": true,
+        "dense": false,
+        "rrf": true,
+        "hop": true,
+        "ce": true
+      },
+      "stage_recall": {
+        "bm25": 1.0,
+        "dense": 0.0,
+        "rrf": 1.0,
+        "hop": 1.0,
+        "ce": 1.0
+      },
+      "drop_at": "dense",
+      "n_relevant": 1,
+      "qid": "128"
+    },
+    {
+      "stage_hit": {
+        "bm25": false,
+        "dense": false,
+        "rrf": false,
+        "hop": false,
+        "ce": false
+      },
+      "stage_recall": {
+        "bm25": 0.0,
+        "dense": 0.0,
+        "rrf": 0.0,
+        "hop": 0.0,
+        "ce": 0.0
+      },
+      "drop_at": "never_retrieved",
+      "n_relevant": 1,
+      "qid": "132"
+    }
+  ],
+  "hnsw_vs_flat": {
+    "n_queries": 40,
+    "hnsw_hit": 37,
+    "hnsw_miss_flat_hit": 0,
+    "both_miss": 3,
+    "index_type": "IndexFlatIP",
+    "n_vectors": 5183
+  }
+}

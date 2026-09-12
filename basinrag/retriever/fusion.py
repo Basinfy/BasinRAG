@@ -7,6 +7,8 @@ from typing import Dict, List, Sequence
 HYBRID_ALPHA = 0.55
 RRF_K = 60
 HOP_LAMBDA = 0.35
+# Prefer neutral for production recall: unreachable lexical hits keep seed-tier weight.
+DEFAULT_HOP_MISSING = "neutral"
 
 
 def weighted_rrf(
@@ -29,12 +31,14 @@ def apply_hop_prior(
     hops: Dict[str, int],
     lam: float = HOP_LAMBDA,
     enabled: bool = True,
-    missing: str = "penalty",
+    missing: str = DEFAULT_HOP_MISSING,
 ) -> Dict[str, float]:
     """Scale fused scores by hop distance.
 
     ``missing="penalty"`` treats nodes the BFS never reached as farther than
-    any observed hop (the previous default of 0 awarded them the seed bonus).
+    any observed hop (gate SciFact control). ``missing="neutral"`` (default)
+    awards unreachable nodes the same floor as hop-0 so isolated BM25/dense
+    hits are not expelled from the top-k.
     """
     if not enabled:
         return dict(scores)

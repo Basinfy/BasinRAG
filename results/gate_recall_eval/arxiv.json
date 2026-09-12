@@ -1,0 +1,44 @@
+{
+  "n_docs": 40,
+  "basins": {
+    "n_nodes": 1378,
+    "n_basins": 67,
+    "n_sources": 40,
+    "median_members": 21.0,
+    "mean_members": 20.567164179104477,
+    "max_members": 30,
+    "singleton_frac": 0.029850746268656716,
+    "mean_hops": 11.834542815674892,
+    "gate_geometry_ok": true
+  },
+  "metrics": {
+    "encoder_pure": {
+      "ndcg@10": 1.0,
+      "mrr@10": 1.0,
+      "recall@10": 1.0,
+      "hit@10": 1.0,
+      "n_queries": 40
+    },
+    "bm25_pure": {
+      "ndcg@10": 1.0,
+      "mrr@10": 1.0,
+      "recall@10": 1.0,
+      "hit@10": 1.0,
+      "n_queries": 40
+    },
+    "hybrid_min": {
+      "ndcg@10": 1.0,
+      "mrr@10": 1.0,
+      "recall@10": 1.0,
+      "hit@10": 1.0,
+      "n_queries": 40
+    },
+    "hybrid_min_topo": {
+      "ndcg@10": 1.0,
+      "mrr@10": 1.0,
+      "recall@10": 1.0,
+      "hit@10": 1.0,
+      "n_queries": 40
+    }
+  }
+}

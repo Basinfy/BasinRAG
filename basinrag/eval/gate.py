@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from .metrics import ndcg_at_k, mrr_at_k, hit_rate_at_k
+from ..retriever.prompts import QUERY_PROMPT as _SHARED_QUERY_PROMPT
 
 SYSTEMS = (
     "encoder_pure",
@@ -24,7 +25,7 @@ LONGDOC_ENCODER_SLACK = 0.01
 MIN_MEDIAN_BASIN = 3.0
 MAX_SINGLETON_FRAC = 0.40
 
-QUERY_PROMPT = "Represent this sentence for searching relevant passages: "
+QUERY_PROMPT = _SHARED_QUERY_PROMPT
 
 
 def recall_at_k(retrieved: Sequence[str], relevant: Set[str], k: int = 10) -> float:
@@ -179,9 +180,12 @@ def decide(
 
 def _ndcg(block: Dict[str, Dict[str, float]], system: str) -> Optional[float]:
     row = block.get(system)
-    if not row:
+    if not row or row.get("skipped"):
         return None
-    return float(row.get("ndcg@10"))
+    val = row.get("ndcg@10")
+    if val is None:
+        return None
+    return float(val)
 
 
 def official_cache_reference(repo_root: Path) -> Dict[str, Any]:
@@ -245,12 +249,15 @@ class GateSearcher:
                             "score": float(score),
                         })
         else:
+            # Gate protocol: hop missing=penalty; no graph expand (avoids kNN leakage on flat SciFact).
             hits = self.hybrid.search_nodes(
                 query,
                 emb,
                 top_k=candidate_k,
                 use_hop_prior=use_hop,
                 use_confidence_gate=False,
+                hop_missing="penalty",
+                expand_graph=False,
             )
 
         if use_rerank and self.reranker and hits:

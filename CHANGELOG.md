@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Docs
+- README / README_pt, `BENCHMARKS.md`, arquitetura e índice descrevem o produto: híbrido BM25+FAISS; bacias como mapa de briefing; números SciFact / BEIR atuais.
+
 ### CONVERT_C
-- Recolhidos claims públicos de leaderboard. O gate (`results/gate/decision.json`) fixa encoder 0,741 > híbrido 0,727 > pacote publicado 0,650.
+- Gate (`results/gate/decision.json`): bacias como briefing; ranking híbrido no SciFact.
 - Persistência por ponteiro `current.json` + builds; `ingest` mescla; API default em localhost.
 
 ## [1.0.4] - 2026-09-09

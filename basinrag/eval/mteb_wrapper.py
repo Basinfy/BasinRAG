@@ -13,6 +13,10 @@ from typing import Dict, Any, Optional
 from mteb.models.model_meta import ModelMeta
 
 
+class SkipLargeCorpus(RuntimeError):
+    """Corpus exceeds the configured doc limit for this machine/run."""
+
+
 class BasinRAGMTEBWrapper:
     """
     Wrapper para o MTEB (v2.20+) que implementa o SearchProtocol oficial para o BasinRAG
@@ -28,8 +32,10 @@ class BasinRAGMTEBWrapper:
         force_reindex: bool = False,
         title_boost: int = 1,
         use_hop_prior: bool = True,
-        use_rerank: bool = True,
+        use_rerank: Optional[bool] = None,
         cache_tag: str = "",
+        auto_disable_rerank_on_flat: bool = True,
+        max_corpus_docs: Optional[int] = None,
     ):
         self.rag = rag_instance
         self.search_type = search_type
@@ -39,8 +45,12 @@ class BasinRAGMTEBWrapper:
         self.force_reindex = force_reindex
         self.title_boost = max(1, int(title_boost))
         self.use_hop_prior = use_hop_prior
+        # Default off for flat (1 node/doc) corpora — CE was the main published SciFact drop.
         self.use_rerank = use_rerank
+        self.auto_disable_rerank_on_flat = auto_disable_rerank_on_flat
         self.cache_tag = cache_tag
+        self.max_corpus_docs = max_corpus_docs
+        self._is_flat_index = False
 
     def index(
         self,
@@ -68,6 +78,7 @@ class BasinRAGMTEBWrapper:
             print(f"[MTEB Wrapper] Cache hit ({len(self.rag.engine.graph)} nós, tag={expected_tag})")
             self.rag._attach_bm25()
             self.rag.retriever = None
+            self._is_flat_index = self._detect_flat_index()
             return
 
         def _join_title_text(title: str, body: str) -> str:
@@ -91,6 +102,11 @@ class BasinRAGMTEBWrapper:
             doc_texts = [_join_title_text(t, x) for t, x in zip(titles, texts)]
 
         print(f"\n[MTEB Wrapper] Indexando {len(doc_texts)} documentos no BasinRAG ({self.search_type})...")
+        if self.max_corpus_docs is not None and len(doc_texts) > self.max_corpus_docs:
+            raise SkipLargeCorpus(
+                f"{len(doc_texts)} docs > max_corpus_docs={self.max_corpus_docs} "
+                f"(use --max-corpus-docs 0 para forçar)"
+            )
 
         batch_size = 64
         all_embeddings = self.rag.ingestor.encoder.encode(
@@ -122,6 +138,25 @@ class BasinRAGMTEBWrapper:
         self.rag._attach_bm25()
         self.rag.retriever = None
         self.rag.persistence.save_topology(self.rag.engine)
+        self._is_flat_index = True  # MTEB wrapper always indexes 1 node per doc
+
+    def _detect_flat_index(self) -> bool:
+        engine = self.rag.engine
+        n = engine.graph.number_of_nodes()
+        if n == 0:
+            return True
+        chunk_indexes = {
+            int(data.get("chunk_index", 0))
+            for _, data in engine.graph.nodes(data=True)
+        }
+        return chunk_indexes == {0} and len(engine.basins) >= max(1, int(0.9 * n))
+
+    def _rerank_enabled(self) -> bool:
+        if self.use_rerank is not None:
+            return bool(self.use_rerank)
+        if self.auto_disable_rerank_on_flat and self._is_flat_index:
+            return False
+        return True
 
     def search(
         self,
@@ -146,7 +181,11 @@ class BasinRAGMTEBWrapper:
         if self.max_queries and len(query_dict) > self.max_queries:
             query_dict = dict(list(query_dict.items())[: self.max_queries])
 
-        print(f"[MTEB Wrapper] Executando busca otimizada para {len(query_dict)} queries no BasinRAG (top_k={top_k}, rerank_top_k={self.rerank_top_k})...")
+        use_ce = self._rerank_enabled()
+        print(
+            f"[MTEB Wrapper] Busca para {len(query_dict)} queries "
+            f"(top_k={top_k}, rerank={use_ce}, flat={self._is_flat_index})..."
+        )
         results: Dict[str, Dict[str, float]] = {}
 
         self.rag._ensure_retriever(search_type=self.search_type, top_k=top_k)
@@ -157,23 +196,21 @@ class BasinRAGMTEBWrapper:
             if idx % 50 == 0 or idx == 1 or idx == len(query_dict):
                 print(f"[MTEB Wrapper] Progresso: {idx}/{len(query_dict)} queries ({idx/len(query_dict)*100:.0f}%)...", flush=True)
 
-            # 1. Query embedding com prompt para encoders modernos (ex: BGE)
-            prompted_query = f"{self.query_prompt}{qtext}" if self.query_prompt else qtext
-            query_emb = retriever._encode_query(prompted_query)
-            norm = np.linalg.norm(query_emb)
-            if norm > 0:
-                query_emb = query_emb / norm
+            # 1. Query embedding — retriever applies BGE prompt canonically
+            query_emb = retriever._encode_query(qtext)
 
             # 2. Busca híbrida ampla (BM25 + Grafo Topológico)
+            pool_k = max(50, top_k * 5) if top_k < 50 else top_k
             if self.search_type == "local":
-                ranked_nodes = retriever._local.search_nodes(query_emb, top_k=top_k)
+                ranked_nodes = retriever._local.search_nodes(query_emb, top_k=pool_k)
             else:
                 ranked_nodes = retriever._hybrid.search_nodes(
                     qtext,
                     query_emb,
-                    top_k=top_k,
+                    top_k=pool_k,
                     use_hop_prior=self.use_hop_prior,
                     use_confidence_gate=False,
+                    expand_graph=not self._is_flat_index,
                 )
 
             if not ranked_nodes:
@@ -187,7 +224,7 @@ class BasinRAGMTEBWrapper:
 
             doc_scores: Dict[str, float] = {}
 
-            if self.use_rerank and reranker and getattr(reranker, "_model", None) != "disabled" and k_rerank > 0:
+            if use_ce and reranker and getattr(reranker, "_model", None) != "disabled" and k_rerank > 0:
                 passages = [c["text"] for c in top_candidates]
                 raw_scores = reranker.predict_scores(qtext, passages)
 

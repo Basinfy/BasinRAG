@@ -1,0 +1,152 @@
+{
+  "protocol": {
+    "skip_rerank": true,
+    "longdoc": "arxiv_fallback_40",
+    "note": "post-recall-improvements eval"
+  },
+  "scifact": {
+    "basins": {
+      "n_nodes": 5183,
+      "n_basins": 5183,
+      "n_sources": 5183,
+      "median_members": 1.0,
+      "mean_members": 1.0,
+      "max_members": 1,
+      "singleton_frac": 1.0,
+      "mean_hops": 0.0,
+      "size_histogram": {
+        "1": 5183
+      },
+      "gate_geometry_ok": false
+    },
+    "metrics": {
+      "encoder_pure": {
+        "ndcg@10": 0.7403912879186786,
+        "mrr@10": 0.7033862433862432,
+        "recall@10": 0.8742222222222221,
+        "hit@10": 0.8833333333333333,
+        "n_queries": 300
+      },
+      "bm25_pure": {
+        "ndcg@10": 0.6766404267105024,
+        "mrr@10": 0.6399801587301586,
+        "recall@10": 0.8126666666666668,
+        "hit@10": 0.8366666666666667,
+        "n_queries": 300
+      },
+      "hybrid_min": {
+        "ndcg@10": 0.7338683681221637,
+        "mrr@10": 0.6992023809523809,
+        "recall@10": 0.8691111111111112,
+        "hit@10": 0.8833333333333333,
+        "n_queries": 300
+      },
+      "hybrid_min_topo": {
+        "ndcg@10": 0.7408350017579411,
+        "mrr@10": 0.7017751322751322,
+        "recall@10": 0.8824444444444445,
+        "hit@10": 0.8933333333333333,
+        "n_queries": 300
+      }
+    }
+  },
+  "arxiv": {
+    "n_docs": 40,
+    "basins": {
+      "n_nodes": 1378,
+      "n_basins": 67,
+      "n_sources": 40,
+      "median_members": 21.0,
+      "mean_members": 20.567164179104477,
+      "max_members": 30,
+      "singleton_frac": 0.029850746268656716,
+      "mean_hops": 11.834542815674892,
+      "gate_geometry_ok": true
+    },
+    "metrics": {
+      "encoder_pure": {
+        "ndcg@10": 1.0,
+        "mrr@10": 1.0,
+        "recall@10": 1.0,
+        "hit@10": 1.0,
+        "n_queries": 40
+      },
+      "bm25_pure": {
+        "ndcg@10": 1.0,
+        "mrr@10": 1.0,
+        "recall@10": 1.0,
+        "hit@10": 1.0,
+        "n_queries": 40
+      },
+      "hybrid_min": {
+        "ndcg@10": 1.0,
+        "mrr@10": 1.0,
+        "recall@10": 1.0,
+        "hit@10": 1.0,
+        "n_queries": 40
+      },
+      "hybrid_min_topo": {
+        "ndcg@10": 1.0,
+        "mrr@10": 1.0,
+        "recall@10": 1.0,
+        "hit@10": 1.0,
+        "n_queries": 40
+      }
+    }
+  },
+  "qasper": {
+    "n_docs": 40,
+    "basins": {
+      "n_nodes": 1378,
+      "n_basins": 67,
+      "n_sources": 40,
+      "median_members": 21.0,
+      "mean_members": 20.567164179104477,
+      "max_members": 30,
+      "singleton_frac": 0.029850746268656716,
+      "mean_hops": 11.834542815674892,
+      "gate_geometry_ok": true
+    },
+    "metrics": {
+      "encoder_pure": {
+        "ndcg@10": 1.0,
+        "mrr@10": 1.0,
+        "recall@10": 1.0,
+        "hit@10": 1.0,
+        "n_queries": 40
+      },
+      "bm25_pure": {
+        "ndcg@10": 1.0,
+        "mrr@10": 1.0,
+        "recall@10": 1.0,
+        "hit@10": 1.0,
+        "n_queries": 40
+      },
+      "hybrid_min": {
+        "ndcg@10": 1.0,
+        "mrr@10": 1.0,
+        "recall@10": 1.0,
+        "hit@10": 1.0,
+        "n_queries": 40
+      },
+      "hybrid_min_topo": {
+        "ndcg@10": 1.0,
+        "mrr@10": 1.0,
+        "recall@10": 1.0,
+        "hit@10": 1.0,
+        "n_queries": 40
+      }
+    }
+  },
+  "decision": {
+    "DECISION": "CONVERT_C",
+    "reason": "longdoc topo-hybrid=+0.0000 (need >=0.01), best_basin=1.0000 vs encoder=1.0000 (slack 0.01)",
+    "scifact_delta_ndcg@10": 0.0069666336357774306,
+    "longdoc_topo_gain_ndcg@10": 0.0,
+    "longdoc_best_basin_ndcg@10": 1.0,
+    "longdoc_encoder_ndcg@10": 1.0,
+    "warnings": [
+      "SciFact control failed: topology gained 0.0070 where h(v) should be 0 (leakage)."
+    ]
+  }
+}

@@ -23,7 +23,10 @@ O produto CONVERT_C é um híbrido **BM25 + FAISS**. As bacias são um mapa de b
 | `encoder_model` | `str` | `"BAAI/bge-base-en-v1.5"` | SentenceTransformer (768d). |
 | `reranker_model` | `str` | `"BAAI/bge-reranker-v2-m3"` | Cross-Encoder. |
 | `search_type` | `str` | `"auto"` | `auto`, `hybrid`, `local`, `global`. |
-| `chunk_size` | `int` | `1000` | Tamanho real do splitter. |
+| `chunk_size` | `int` | `512` | Tamanho do splitter (retrieval child). |
+| `chunk_overlap` | `int` | `128` | Overlap entre chunks (~25%). |
+| `query_prompt` | `str` | BGE instruction | Prefixo de query para o encoder. |
+| `use_rerank` | `bool` | `True` | Cross-Encoder no path de produção. |
 | `chunk_overlap` | `int` | `100` | Overlap real do splitter. |
 | `min_confidence` | `float` | `0.15` | Só abstém o `chat`; não esvazia o briefing. |
 

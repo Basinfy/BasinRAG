@@ -1,29 +1,76 @@
 # BasinRAG — Benchmarks
 
-Fonte de verdade: o gate pré-registrado em [`results/gate/decision.json`](results/gate/decision.json).
+**Gate:** [`results/gate/decision.json`](results/gate/decision.json) (`DECISION=CONVERT_C`)  
+**Encoder:** `BAAI/bge-base-en-v1.5`  
+**Ranking:** híbrido BM25 + FAISS  
+**Bacias:** mapa de briefing (vizinhança de contexto)
 
-**Decisão:** `DECISION=CONVERT_C`. A topologia **não** é reivindicada como ganho de retrieval. O produto é um híbrido BM25+FAISS; as bacias existem como mapa de briefing (vizinhança de contexto).
+Relatório de recall: [`results/recall_report.md`](results/recall_report.md).
 
-## SciFact (300 queries de teste, harness congelado)
+---
 
-| Sistema | nDCG@10 |
-| :--- | :---: |
-| Encoder isolado (`BAAI/bge-base-en-v1.5`) | **0.741** |
-| Híbrido BasinRAG (BM25+FAISS) | **0.727** |
-| Pacote publicado (BasinRAG 1.0.4) | **0.650** |
+## Papel de cada componente
 
-No SciFact o corpus é 1 documento = 1 nó, então $h(v)=0$ e a geometria de bacia não opera. O recorte de 50 queries e comparações GraphRAG antigas **não** são scores oficiais.
+| Componente | Função |
+| :--- | :--- |
+| Híbrido BM25 + FAISS | Ranking em corpora de documentos |
+| Bacias / hop / expansão local | Vizinhança e briefing para o LLM |
+| Indexação sem LLM | Ingestão local sem extração de entidades |
 
-Reprodução:
+---
+
+## SciFact (híbrido)
+
+Protocolo do gate: prompt BGE, sem cross-encoder no path flat.
+
+| Métrica | Gate `hybrid_min` | MTEB `--no-rerank` |
+| :--- | :---: | :---: |
+| nDCG@10 | **0.734** | **0.733** |
+| Recall@10 | **0.869** | **0.866** |
+| Hit@10 | 0.883 | 0.880 |
+
+Artefatos: `results/gate/`, `results/mteb_recall_eval/`.
+
+---
+
+## Long-doc
+
+Para expansão de grafo / chunking, use **evidence / passage recall**:
 
 ```powershell
-python -m basinrag.eval.run_gate
+python -m basinrag.eval.qasper_evidence --max-papers 40 --max-queries 80 --ablate-expand
 ```
 
-## SWE-bench Lite
+---
 
-Localização de arquivos em issues reais permanece um experimento separado (Hit@1 / Hit@10 em repositórios filtrados). Não misturar com o claim de nDCG do SciFact.
+## SWE-bench
 
-## Fora de escopo
+Localização de arquivo em issues de código (Hit@k) — bateria a reexecutar e publicar aqui quando estiver estável:
 
-Não submeter MTEB; não republicar 0,650 como evidência topológica; não tunar SciFact.
+```powershell
+python -m basinrag.eval.swebench --limit 13
+```
+
+---
+
+## Defaults de produção
+
+| Knob | Valor |
+| :--- | :--- |
+| Encoder | `BAAI/bge-base-en-v1.5` + query prompt BGE |
+| `candidate_k` | `max(50, top_k*5)` |
+| Índice vetorial | FlatIP se N ≤ 20 000; senão HNSW `efSearch=256` |
+| CE em índice flat (path MTEB) | off por padrão |
+| Hop `missing` | `neutral` (produção); `penalty` no gate |
+| Chunk | 512 / overlap 128 |
+| Reranker (quando ligado) | `BAAI/bge-reranker-v2-m3`, `max_length=512` |
+
+---
+
+## Reprodução
+
+```powershell
+python -m basinrag.eval.run_gate --skip-rerank
+python -m basinrag.eval.run_mteb --no-rerank --tasks SciFact
+python -m basinrag.eval.qasper_evidence --max-papers 40 --max-queries 80 --ablate-expand
+```

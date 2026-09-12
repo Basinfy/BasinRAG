@@ -1,5 +1,7 @@
 # RAG Topológico: A Teoria das Bacias de Atração no BasinRAG
 
+As bacias estruturam a **vizinhança de contexto** (briefing). Em corpora flat (1 documento = 1 nó), $h(v)=0$. Números de ranking: [BENCHMARKS](../BENCHMARKS.md).
+
 Este documento delineia a fundamentação matemática subjacente ao **BasinRAG**, elucidando as propriedades de partições estruturais em grafos funcionais quando comparadas a grafos de co-ocorrência estocásticos.
 
 ## 1. Dinâmica de Conectividade em Grafos Baseados em Co-ocorrência

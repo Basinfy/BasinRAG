@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from typing import List, Dict, Any
+from collections import deque
+from typing import Any, Dict, List, Optional, Sequence, Set
+
 import numpy as np
+
 from ..core.topology import BasinTopologyEngine
 from ..indexer.bm25 import BM25Index
-from .local_search import TopologicalLocalSearch
-from .fusion import weighted_rrf, apply_hop_prior, ranked_ids
 from .briefing import MIN_CONFIDENCE
+from .fusion import DEFAULT_HOP_MISSING, apply_hop_prior, ranked_ids, weighted_rrf
+from .local_search import TopologicalLocalSearch
 
 
 class HybridSearch:
@@ -29,6 +32,63 @@ class HybridSearch:
         texts = [n[1].get("text", "") for n in nodes]
         self._bm25.build(ids, texts)
 
+    @staticmethod
+    def resolve_candidate_k(top_k: int, candidate_k: Optional[int] = None) -> int:
+        """Align production pool with the gate harness: max(50, top_k*5)."""
+        if candidate_k is not None:
+            return max(1, int(candidate_k))
+        return max(50, top_k * 5)
+
+    def _expand_graph_candidates(
+        self,
+        seed_ids: Sequence[str],
+        max_extra: int = 100,
+        sequential_radius: int = 2,
+    ) -> List[str]:
+        """Pull new nodes (sequential / basin siblings / virtual-edge) before RRF."""
+        if not seed_ids or max_extra <= 0:
+            return []
+        seeds = [nid for nid in seed_ids if nid in self.engine.graph]
+        if not seeds:
+            return []
+
+        expanded: List[str] = []
+        seen: Set[str] = set(seeds)
+
+        def _add(nid: str) -> bool:
+            if nid in seen or nid not in self.engine.graph:
+                return False
+            seen.add(nid)
+            expanded.append(nid)
+            return len(expanded) >= max_extra
+
+        for seed in seeds:
+            frontier = {seed}
+            for _ in range(max(0, sequential_radius)):
+                nxt: Set[str] = set()
+                for nid in frontier:
+                    for nbr in self.local_search._neighbors_of_type(nid, "sequential"):
+                        if _add(nbr):
+                            return expanded
+                        nxt.add(nbr)
+                frontier = nxt
+
+        for seed in seeds:
+            basin_id = self.engine.basin_id_of(seed)
+            if not basin_id or basin_id not in self.engine.basins:
+                continue
+            for nid in self.engine.basins[basin_id].rho_tree.nodes:
+                if _add(nid):
+                    return expanded
+
+        fringe_src = list(seeds) + list(expanded)
+        for nid in fringe_src:
+            for nbr in self.local_search._neighbors_of_type(nid, "virtual-edge"):
+                if _add(nbr):
+                    return expanded
+
+        return expanded
+
     def search_nodes(
         self,
         query: str,
@@ -36,6 +96,10 @@ class HybridSearch:
         top_k: int = 5,
         use_hop_prior: bool = True,
         use_confidence_gate: bool = True,
+        candidate_k: Optional[int] = None,
+        hop_missing: str = DEFAULT_HOP_MISSING,
+        expand_graph: bool = True,
+        expand_max_extra: int = 100,
     ) -> List[Dict[str, Any]]:
         if self._bm25 is None or self._bm25.n == 0:
             hits = self.local_search.dense_hits(query_embedding, top_k=top_k)
@@ -43,10 +107,10 @@ class HybridSearch:
                 return []
             return hits
 
-        candidate_k = max(20, top_k * 3)
-        bm25_hits = self._bm25.score(query, top_k=candidate_k)
+        ck = self.resolve_candidate_k(top_k, candidate_k)
+        bm25_hits = self._bm25.score(query, top_k=ck)
         bm25_ids = [nid for nid, _ in bm25_hits]
-        semantic = self.local_search.dense_hits(query_embedding, top_k=candidate_k)
+        semantic = self.local_search.dense_hits(query_embedding, top_k=ck)
         semantic_ids = [item["id"] for item in semantic]
 
         best_dense = semantic[0]["score"] if semantic else 0.0
@@ -54,13 +118,25 @@ class HybridSearch:
         if use_confidence_gate and best_dense < MIN_CONFIDENCE and best_bm25 < 0.5:
             return []
 
-        # Dynamic geodesic hops from top query seeds
-        all_candidate_ids = set(bm25_ids) | set(semantic_ids)
+        # Graph expansion adds nodes that BM25/dense missed (multi-evidence recall).
+        seed_pool = list(dict.fromkeys(semantic_ids[:5] + bm25_ids[:5]))
+        expanded_ids: List[str] = []
+        if expand_graph:
+            expanded_ids = self._expand_graph_candidates(
+                seed_pool, max_extra=expand_max_extra, sequential_radius=2
+            )
+
+        all_candidate_ids = set(bm25_ids) | set(semantic_ids) | set(expanded_ids)
+        # Expanded-only nodes get weak semantic ranks after the dense list for RRF.
+        fused_semantic_ids = list(semantic_ids)
+        for nid in expanded_ids:
+            if nid not in semantic_ids and nid not in bm25_ids:
+                fused_semantic_ids.append(nid)
+
         seeds = (set(semantic_ids[:3]) | set(bm25_ids[:3])) & all_candidate_ids
         if not seeds:
             seeds = set(list(all_candidate_ids)[:3])
 
-        from collections import deque
         hops: Dict[str, int] = {s: 0 for s in seeds}
         q_bfs = deque((s, 0) for s in seeds)
         while q_bfs:
@@ -71,8 +147,10 @@ class HybridSearch:
                         hops[nbr] = d + 1
                         q_bfs.append((nbr, d + 1))
 
-        scores = weighted_rrf(bm25_ids, semantic_ids)
-        scores = apply_hop_prior(scores, hops, enabled=use_hop_prior)
+        scores = weighted_rrf(bm25_ids, fused_semantic_ids)
+        scores = apply_hop_prior(
+            scores, hops, enabled=use_hop_prior, missing=hop_missing
+        )
         order = ranked_ids(scores, top_k)
 
         dense_map = {item["id"]: max(0.0, float(item["score"])) for item in semantic}
@@ -98,6 +176,6 @@ class HybridSearch:
                 "score": calibrated_score,
                 "dense_score": d_score,
                 "bm25_score": b_score,
+                "metadata": data.get("metadata") or {},
             })
         return results
-

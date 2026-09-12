@@ -1,9 +1,13 @@
-"""FAISS index factory: exact IP for small corpora, HNSW (L2 on unit vectors) when N grows."""
+"""FAISS index factory: exact IP for small corpora, HNSW when N grows."""
 from __future__ import annotations
 
 import numpy as np
 
-HNSW_THRESHOLD = 4096
+# Keep FlatIP longer to protect recall on mid-size BEIR corpora (e.g. SciFact ~5k).
+HNSW_THRESHOLD = 20000
+HNSW_EF_SEARCH = 256
+HNSW_EF_CONSTRUCTION = 80
+HNSW_M = 32
 
 
 def build_ip_index(embeddings: np.ndarray):
@@ -19,9 +23,9 @@ def build_ip_index(embeddings: np.ndarray):
         return None
     faiss.normalize_L2(vecs)
     if n > HNSW_THRESHOLD:
-        index = faiss.IndexHNSWFlat(d, 32, faiss.METRIC_INNER_PRODUCT)
-        index.hnsw.efSearch = 64
-        index.hnsw.efConstruction = 80
+        index = faiss.IndexHNSWFlat(d, HNSW_M, faiss.METRIC_INNER_PRODUCT)
+        index.hnsw.efSearch = HNSW_EF_SEARCH
+        index.hnsw.efConstruction = HNSW_EF_CONSTRUCTION
         index.add(vecs)
         return index
     index = faiss.IndexFlatIP(d)

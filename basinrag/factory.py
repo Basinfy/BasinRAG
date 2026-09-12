@@ -12,6 +12,7 @@ from .indexer.summarizer import BasinSummarizer
 from .indexer.bm25 import BM25Index
 from .retriever.base import BasinRAGRetriever
 from .retriever.briefing import BriefingPacket
+from .retriever.prompts import QUERY_PROMPT
 
 
 @dataclass
@@ -22,9 +23,11 @@ class BasinRAGConfig:
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
     storage_dir: str = ".basinrag"
     search_type: str = "auto"
-    chunk_size: int = 1000
-    chunk_overlap: int = 100
+    chunk_size: int = 512
+    chunk_overlap: int = 128
     min_confidence: float = 0.15
+    query_prompt: str = QUERY_PROMPT
+    use_rerank: bool = True
 
 
 class BasinRAG:
@@ -172,6 +175,13 @@ class BasinRAG:
                 search_type=self.config.search_type,
                 top_k=5,
                 reranker_model=self.config.reranker_model,
+                query_prompt=self.config.query_prompt,
+                use_rerank=self.config.use_rerank,
+            )
+        if search_type is not None or top_k is not None:
+            self.retriever.configure(
+                search_type=search_type if search_type is not None else None,
+                top_k=top_k if top_k is not None else None,
             )
 
     async def start_background_summarizer(self, verbose: bool = False):

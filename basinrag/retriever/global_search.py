@@ -26,7 +26,7 @@ class TopologicalGlobalSearch:
         self,
         query: str,
         top_k_basins: int = 5,
-        max_nodes_per_basin: int = 3,
+        max_nodes_per_basin: int = 8,
     ) -> List[Dict[str, Any]]:
         if not self.engine.basins:
             return []

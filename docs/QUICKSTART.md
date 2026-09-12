@@ -1,85 +1,60 @@
-# 🚀 Guia de Início Rápido (Quickstart)
+# Guia de Início Rápido (Quickstart)
 
-Este guia prático fornece o passo a passo para você instalar, configurar e extrair valor do **BasinRAG** em poucos minutos.
+Instalar, ingerir e consultar o **BasinRAG** — RAG híbrido BM25 + FAISS com bacias como **mapa de briefing**. Detalhes: [README](../README_pt.md), [BENCHMARKS](../BENCHMARKS.md).
 
-## 1. Requisitos do Sistema
+## 1. Requisitos
 
-Antes de começar, certifique-se de que seu ambiente atende aos seguintes requisitos:
-- **Python:** 3.10 ou superior
-- **Bibliotecas Base:** FAISS, PyTorch, NumPy, SciPy, FastAPI
-- **Modelos Locais (Opcional):** Ollama ou serviço compatível com API do OpenAI para geração (LLM)
+- **Python** 3.10+
+- FAISS, PyTorch, NumPy (puxados pelo pacote)
+- Opcional: Ollama (ou API OpenAI-compatível) para chat / L3
 
 ## 2. Instalação
 
-### Instalação via Pip
-A forma mais fácil de instalar o BasinRAG é via `pip`:
 ```bash
-pip install basinrag
+pip install -e ".[dev,api,ollama]"
 ```
 
-### Instalação para Desenvolvimento
-Se desejar contribuir ou modificar o código-fonte:
-```bash
-git clone https://github.com/seu-usuario/BasinRAG.git
-cd BasinRAG
-pip install -e .[dev,api]
-```
+Ou clone + mesmo comando na raiz do repo.
 
-## 3. Passo a Passo Prático
+## 3. Uso rápido
 
-### Passo 1: Ingestão de Documentos
-Você pode ingerir diretórios contendo arquivos PDF, TXT ou MD usando o SDK Python.
+### Python
 
 ```python
-from basinrag.factory import BasinRAG, BasinRAGConfig
+from basinrag import BasinRAG, BasinRAGConfig
 
-# Configuração básica
 config = BasinRAGConfig(
-    persist_dir="./.basinrag",
-    embedding_model="all-MiniLM-L6-v2"
+    storage_dir=".basinrag",
+    encoder_model="BAAI/bge-base-en-v1.5",  # padrão
 )
+rag = BasinRAG(config)
+rag.ingest("./meus_documentos")  # PDF / MD / TXT
 
-# Inicialização e Ingestão
-engine = BasinRAG.from_directory(
-    directory="./meus_documentos",
-    config=config
-)
-
-print(f"Ingestão concluída. Documentos indexados: {engine.get_stats()['total_documents']}")
+docs = rag.query("Qual é o princípio central?", top_k=5)
+for d in docs:
+    print(d)
 ```
 
-### Passo 2: Executando Queries de Busca Híbrida e Global
-O método `query` aproveita o RRF (Reciprocal Rank Fusion) para mesclar buscas semânticas (FAISS) e lexicais (BM25), otimizadas pelo prior topológico das Bacias.
+Chunks padrão: **512 / overlap 128**.
 
-```python
-resposta = engine.query(
-    "Quais são os principais fatores de risco mencionados nos relatórios?",
-    top_k=5,
-    rerank=True
-)
+### CLI
 
-print(f"Resposta Gerada: {resposta.answer}")
-for ctx in resposta.contexts:
-    print(f"Fonte: {ctx.filename} - Score: {ctx.score:.4f}")
-```
-
-### Passo 3: Chat Interativo em Streaming
-Para aplicações conversacionais, o BasinRAG suporta streaming nativo no terminal ou via API.
-
-```python
-for chunk in engine.chat_stream("Explique o impacto da nova regulamentação no setor."):
-    print(chunk, end="", flush=True)
-```
-
-### Passo 4: Subindo o Servidor FastAPI
-Inicie a API REST e WebSockets embutida.
 ```bash
-python -m basinrag.server --port 8000 --host 0.0.0.0
+basinrag ingest ./docs
+basinrag query "Quais os principais achados?" --type auto --top-k 5
+basinrag chat
+basinrag serve --port 8000
 ```
 
-### Passo 5: Containerização com Docker
-Para rodar rapidamente via container, utilizando o Docker Compose:
-```bash
-docker-compose up -d
-```
-O serviço estará disponível em `http://localhost:8000`. Acesse a documentação Swagger em `http://localhost:8000/docs`.
+## 4. O que esperar do retrieval
+
+| Modo | Uso |
+| :--- | :--- |
+| `global` / `hybrid` | BM25 + FAISS + RRF (ranking principal) |
+| `local` | Expansão na vizinhança da bacia (briefing) |
+
+## 5. Próximos passos
+
+- [API Reference](API_REFERENCE.md)
+- [Arquitetura](../ARCHITECTURE.md)
+- [Deploy](DEPLOYMENT.md)

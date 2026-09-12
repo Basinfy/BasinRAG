@@ -57,6 +57,23 @@ def test_hop_prior_penalizes_unreachable_nodes():
     assert off["seed"] == off["orphan"] == 1.0
 
 
+def test_hop_prior_neutral_default_keeps_orphans():
+    from basinrag.retriever.fusion import apply_hop_prior, DEFAULT_HOP_MISSING
+    scores = {"seed": 1.0, "orphan": 1.0}
+    hops = {"seed": 0}
+    assert DEFAULT_HOP_MISSING == "neutral"
+    out = apply_hop_prior(scores, hops)
+    assert out["orphan"] == out["seed"]
+
+
+def test_hybrid_candidate_k_matches_gate():
+    from basinrag.retriever.hybrid_search import HybridSearch
+    assert HybridSearch.resolve_candidate_k(5) == 50
+    assert HybridSearch.resolve_candidate_k(10) == 50
+    assert HybridSearch.resolve_candidate_k(20) == 100
+    assert HybridSearch.resolve_candidate_k(10, candidate_k=30) == 30
+
+
 def test_query_routing():
     assert IntelligentQueryRouter.route("qual é o tema principal deste texto?") == "global"
     assert IntelligentQueryRouter.route("summarize the main theme of this book") == "global"
@@ -64,6 +81,8 @@ def test_query_routing():
     assert IntelligentQueryRouter.route("qual é a idade do joão?") == "hybrid"
     assert IntelligentQueryRouter.route("Hawking") == "hybrid"
     assert IntelligentQueryRouter.route("quais são os experimentos de Millikan?") == "hybrid"
+    assert IntelligentQueryRouter.route("in this section what does it say about X") == "local"
+    assert IntelligentQueryRouter.route("neste parágrafo o que significa") == "local"
 
 
 def test_missing_ingest_dir_does_not_create_folder(tmp_path):

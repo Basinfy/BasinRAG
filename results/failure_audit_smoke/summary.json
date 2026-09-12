@@ -1,0 +1,35 @@
+{
+  "scifact": {
+    "n_queries": 40,
+    "stage_hit_rate@10": {
+      "bm25": 0.9,
+      "dense": 0.925,
+      "rrf": 0.925,
+      "hop": 0.925,
+      "ce": 0.925
+    },
+    "stage_mean_recall@10": {
+      "bm25": 0.86,
+      "dense": 0.9075,
+      "rrf": 0.9012499999999999,
+      "hop": 0.9075,
+      "ce": 0.9075
+    },
+    "drop_heatmap": {
+      "never_retrieved": 2,
+      "none": 36,
+      "rrf": 1,
+      "dense": 1
+    }
+  },
+  "qasper": null,
+  "hnsw_vs_flat_scifact": {
+    "n_queries": 40,
+    "hnsw_hit": 37,
+    "hnsw_miss_flat_hit": 0,
+    "both_miss": 3,
+    "index_type": "IndexFlatIP",
+    "n_vectors": 5183
+  },
+  "hnsw_vs_flat_qasper": null
+}

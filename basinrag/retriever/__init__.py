@@ -1,6 +1,6 @@
 """BasinRAG retrievers."""
 
-__all__ = ["BasinRAGRetriever", "TopologicalLocalSearch", "TopologicalGlobalSearch", "MetaBasin", "build_meta_basins"]
+__all__ = ["BasinRAGRetriever", "TopologicalLocalSearch", "TopologicalGlobalSearch"]
 
 
 def __getattr__(name):
@@ -13,11 +13,4 @@ def __getattr__(name):
     if name == "TopologicalGlobalSearch":
         from .global_search import TopologicalGlobalSearch
         return TopologicalGlobalSearch
-    if name == "MetaBasin":
-        from .meta_basins import MetaBasin
-        return MetaBasin
-    if name == "build_meta_basins":
-        from .meta_basins import build_meta_basins
-        return build_meta_basins
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
+    raise AttributeError(f"module {__name__!r} has no attribute {name}")

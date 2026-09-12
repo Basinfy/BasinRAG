@@ -53,8 +53,9 @@ class BasinRAGRetriever(BaseRetriever):
             self._query_cache[query] = self.encoder.encode(query)
         return self._query_cache[query]
 
-    def brief(self, query: str) -> BriefingPacket:
-        strategy = self.search_type
+    def brief(self, query: str, search_type: Optional[str] = None, top_k: Optional[int] = None) -> BriefingPacket:
+        strategy = search_type if search_type is not None else self.search_type
+        k = top_k if top_k is not None else self.top_k
         if strategy == "auto":
             strategy = IntelligentQueryRouter.route_with_embeddings(query)
 
@@ -65,7 +66,7 @@ class BasinRAGRetriever(BaseRetriever):
 
         packet = BriefingPacket()
         if strategy == "global":
-            parts = self._global.search_structured(query, top_k_basins=self.top_k)
+            parts = self._global.search_structured(query, top_k_basins=k)
             if not parts:
                 return packet
             for part in parts:
@@ -77,45 +78,34 @@ class BasinRAGRetriever(BaseRetriever):
                 packet.node_ids.extend(part.get("node_ids") or [])
             packet.confidence = max(float(p.get("score") or 0.0) for p in parts)
         elif strategy == "hybrid":
-            nodes = self._hybrid.search_nodes(query, query_emb, top_k=self.top_k * 2)
+            nodes = self._hybrid.search_nodes(
+                query, query_emb, top_k=k * 2, use_confidence_gate=False
+            )
             if not nodes:
                 return packet
-            self._fill_from_nodes(packet, nodes, [])
+            self._fill_from_nodes(packet, nodes)
         else:
-            nodes = self._local.search_nodes(query_emb, top_k=self.top_k * 2)
+            nodes = self._local.search_nodes(query_emb, top_k=k * 2)
             if not nodes:
                 return packet
-            self._fill_from_nodes(packet, nodes, [])
+            self._fill_from_nodes(packet, nodes)
 
-        rerankable = packet.texts_for_rerank()
-        if rerankable and self._reranker:
-            # Build text→node_id mapping BEFORE reranking so we can realign
-            text_to_nid = {}
-            for i, nid in enumerate(packet.node_ids):
-                if i < len(packet.hubs):
-                    text_to_nid[packet.hubs[i]] = nid
-                elif i - len(packet.hubs) < len(packet.neighbors):
-                    text_to_nid[packet.neighbors[i - len(packet.hubs)]] = nid
-            ordered = self._reranker.rerank(query, rerankable, top_k=self.top_k)
-            hub_set = set(packet.hubs)
-            packet.hubs = [t for t in ordered if t in hub_set]
-            packet.neighbors = [t for t in ordered if t not in hub_set]
-            # Realign node_ids to match new text order
-            packet.node_ids = [
-                text_to_nid.get(t, "") for t in packet.hubs + packet.neighbors
-            ]
-        elif rerankable:
-            combined = rerankable[: self.top_k]
-            hub_set = set(packet.hubs)
-            packet.hubs = [t for t in combined if t in hub_set]
-            packet.neighbors = [t for t in combined if t not in hub_set]
-            packet.node_ids = packet.node_ids[: len(packet.hubs) + len(packet.neighbors)]
+        items = list(zip(packet.node_ids, packet.hubs + packet.neighbors))
+        if items and self._reranker:
+            ordered = self._reranker.rerank_items(query, items, top_k=k)
+            packet.node_ids = [nid for nid, _ in ordered]
+            packet.hubs = [text for _, text in ordered]
+            packet.neighbors = []
+        elif items:
+            packet.node_ids = packet.node_ids[:k]
+            packet.hubs = (packet.hubs + packet.neighbors)[:k]
+            packet.neighbors = []
         return packet
 
-    def _fill_from_nodes(self, packet: BriefingPacket, nodes, seed_ids):
+    def _fill_from_nodes(self, packet: BriefingPacket, nodes, seed_ids=None):
         seen = set()
         best = 0.0
-        for nid in seed_ids:
+        for nid in seed_ids or []:
             if nid in seen or nid not in self.engine.graph:
                 continue
             seen.add(nid)

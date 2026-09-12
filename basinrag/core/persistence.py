@@ -1,3 +1,4 @@
+import hashlib
 import os
 import json
 import shutil
@@ -5,11 +6,10 @@ import time
 import uuid
 import numpy as np
 import networkx as nx
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from ..logging_config import setup_logging
 
 logger = setup_logging()
-
 
 
 def dump_graph(graph) -> Dict[str, Any]:
@@ -42,8 +42,13 @@ def load_graph(data: Dict[str, Any]):
         return nx.node_link_graph(payload)
 
 
+def basin_filename(basin_id: str) -> str:
+    digest = hashlib.sha256(str(basin_id).encode("utf-8")).hexdigest()[:16]
+    return f"{digest}.json"
+
+
 def safe_replace_dir(src_dir: str, dst_dir: str, retries: int = 5, delay: float = 0.1) -> None:
-    """Substituição segura e transacional de diretórios compatível com Windows e Linux."""
+    """Replace a directory by rename. Never merge with copytree (that ghosts stale basins)."""
     if not os.path.exists(src_dir):
         raise FileNotFoundError(f"Diretório de origem não existe: {src_dir}")
 
@@ -52,21 +57,18 @@ def safe_replace_dir(src_dir: str, dst_dir: str, retries: int = 5, delay: float 
         return
 
     dead_dir = f"{dst_dir}.dead.{uuid.uuid4().hex[:8]}"
-
-    # 1. Move diretório ativo para área transitória
+    last_error: Optional[OSError] = None
     for attempt in range(retries):
         try:
             os.rename(dst_dir, dead_dir)
+            last_error = None
             break
-        except OSError:
-            if attempt == retries - 1:
-                # Fallback: cópia recursiva preservando pastas
-                shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
-                shutil.rmtree(src_dir, ignore_errors=True)
-                return
+        except OSError as exc:
+            last_error = exc
             time.sleep(delay * (2 ** attempt))
+    if last_error is not None:
+        raise RuntimeError(f"Falha ao recuar o diretório ativo: {last_error}") from last_error
 
-    # 2. Ativa novo diretório
     try:
         os.rename(src_dir, dst_dir)
     except Exception as exc:
@@ -76,7 +78,6 @@ def safe_replace_dir(src_dir: str, dst_dir: str, retries: int = 5, delay: float 
             pass
         raise RuntimeError(f"Falha crítica ao ativar novo diretório: {exc}") from exc
 
-    # 3. Remove pasta morta com retry
     for attempt in range(retries):
         try:
             shutil.rmtree(dead_dir, ignore_errors=False)
@@ -87,23 +88,46 @@ def safe_replace_dir(src_dir: str, dst_dir: str, retries: int = 5, delay: float 
             time.sleep(delay * (2 ** attempt))
 
 
-class BasinPersistence:
+def _atomic_write_json(path: str, payload: Dict[str, Any]) -> None:
+    tmp = f"{path}.tmp-{uuid.uuid4().hex[:8]}"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload, f)
+    os.replace(tmp, path)
 
-    """Split persistence: metadata JSON, embeddings NPZ, BM25 JSON, buildId."""
+
+class BasinPersistence:
+    """Split persistence: metadata JSON, embeddings NPZ, BM25 JSON, atomic current.json pointer."""
 
     def __init__(self, storage_dir: str = ".basinrag"):
         self.storage_dir = storage_dir
         os.makedirs(self.storage_dir, exist_ok=True)
-        self.basins_dir = os.path.join(storage_dir, "basins")
-        os.makedirs(self.basins_dir, exist_ok=True)
+        os.makedirs(os.path.join(self.storage_dir, "builds"), exist_ok=True)
+
+    def active_dir(self) -> str:
+        pointer = os.path.join(self.storage_dir, "current.json")
+        if os.path.exists(pointer):
+            try:
+                with open(pointer, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                build_id = data.get("build_id") or data.get("buildId") or ""
+                if build_id:
+                    cand = os.path.join(self.storage_dir, "builds", str(build_id))
+                    if os.path.isdir(cand):
+                        return cand
+            except (OSError, json.JSONDecodeError):
+                pass
+        return self.storage_dir
+
+    @property
+    def basins_dir(self) -> str:
+        return os.path.join(self.active_dir(), "basins")
 
     def save_topology(self, engine) -> bool:
         logger.info(f"Salvando indice em {self.storage_dir}...")
-        tmp = self.storage_dir.rstrip("\\/") + ".tmp-" + uuid.uuid4().hex[:8]
+        build_id = uuid.uuid4().hex
+        build_dir = os.path.join(self.storage_dir, "builds", build_id)
         try:
-            os.makedirs(tmp, exist_ok=True)
-            basins_tmp = os.path.join(tmp, "basins")
-            os.makedirs(basins_tmp, exist_ok=True)
+            os.makedirs(os.path.join(build_dir, "basins"), exist_ok=True)
 
             nodes = list(engine.graph.nodes(data=True))
             node_ids = [n[0] for n in nodes]
@@ -111,65 +135,85 @@ class BasinPersistence:
                 [n[1].get("embedding", np.zeros(1, dtype=np.float32)) for n in nodes],
                 dtype=np.float32,
             )
-            with open(os.path.join(tmp, "node_ids.json"), "w", encoding="utf-8") as f:
+            with open(os.path.join(build_dir, "node_ids.json"), "w", encoding="utf-8") as f:
                 json.dump(node_ids, f)
             np.savez_compressed(
-                os.path.join(tmp, "embeddings.npz"),
+                os.path.join(build_dir, "embeddings.npz"),
                 vectors=embeddings,
             )
 
             graph_data = dump_graph(snapshot_without_embeddings(engine.graph))
-            with open(os.path.join(tmp, "graph.json"), "w", encoding="utf-8") as f:
+            with open(os.path.join(build_dir, "graph.json"), "w", encoding="utf-8") as f:
                 json.dump(graph_data, f, ensure_ascii=False)
 
-            build_id = uuid.uuid4().hex
             engine.build_id = build_id
             meta = {
                 "buildId": build_id,
                 "section_size": getattr(engine, "section_size", 20),
                 "encoder_model": getattr(engine, "encoder_model", ""),
             }
+
             if hasattr(engine.successor, "backup_to"):
-                engine.successor.backup_to(os.path.join(tmp, "successor.db"))
+                engine.successor.backup_to(os.path.join(build_dir, "successor.db"))
             else:
-                meta["successor"] = dict(engine.successor.items()) if hasattr(engine.successor, 'items') else engine.successor
+                meta["successor"] = dict(engine.successor.items()) if hasattr(engine.successor, "items") else engine.successor
 
             if hasattr(engine.attractor_of, "backup_to"):
-                engine.attractor_of.backup_to(os.path.join(tmp, "attractor.db"))
+                engine.attractor_of.backup_to(os.path.join(build_dir, "attractor.db"))
             else:
-                meta["attractor_of"] = dict(engine.attractor_of.items()) if hasattr(engine.attractor_of, 'items') else engine.attractor_of
+                meta["attractor_of"] = dict(engine.attractor_of.items()) if hasattr(engine.attractor_of, "items") else engine.attractor_of
 
-            with open(os.path.join(tmp, "meta.json"), "w", encoding="utf-8") as f:
+            if hasattr(engine, "close_stores"):
+                engine.close_stores()
+
+            with open(os.path.join(build_dir, "meta.json"), "w", encoding="utf-8") as f:
                 json.dump(meta, f)
 
+            basins_tmp = os.path.join(build_dir, "basins")
             for basin_id, basin in engine.basins.items():
                 basin_data = dump_graph(snapshot_without_embeddings(basin.rho_tree))
                 basin_data["_meta"] = {
+                    "basin_id": basin_id,
                     "source": getattr(basin, "source", ""),
                     "cohesion": getattr(basin, "cohesion", 1.0),
                 }
-                path = os.path.join(basins_tmp, f"{basin_id}.json")
+                path = os.path.join(basins_tmp, basin_filename(basin_id))
                 with open(path, "w", encoding="utf-8") as f:
                     json.dump(basin_data, f, ensure_ascii=False)
 
             if getattr(engine, "bm25", None) is not None:
-                engine.bm25.save(os.path.join(tmp, "bm25.json"), build_id=build_id)
+                engine.bm25.save(os.path.join(build_dir, "bm25.json"), build_id=build_id)
 
-            # Substituição atômica de todo o diretório para garantir integridade
-            safe_replace_dir(tmp, self.storage_dir)
+            _atomic_write_json(
+                os.path.join(self.storage_dir, "current.json"),
+                {"build_id": build_id},
+            )
+            if hasattr(engine, "reopen_stores"):
+                engine.reopen_stores(build_dir)
             return True
         except (IOError, OSError):
             logger.exception("Erro de I/O ao salvar")
-            shutil.rmtree(tmp, ignore_errors=True)
+            shutil.rmtree(build_dir, ignore_errors=True)
+            if hasattr(engine, "reopen_stores"):
+                try:
+                    engine.reopen_stores(self.active_dir())
+                except Exception:
+                    pass
             return False
         except Exception:
             logger.exception("Erro inesperado ao salvar topologia")
-            shutil.rmtree(tmp, ignore_errors=True)
+            shutil.rmtree(build_dir, ignore_errors=True)
+            if hasattr(engine, "reopen_stores"):
+                try:
+                    engine.reopen_stores(self.active_dir())
+                except Exception:
+                    pass
             return False
 
     def load_topology(self, engine) -> bool:
-        graph_path = os.path.join(self.storage_dir, "graph.json")
-        emb_path = os.path.join(self.storage_dir, "embeddings.npz")
+        root = self.active_dir()
+        graph_path = os.path.join(root, "graph.json")
+        emb_path = os.path.join(root, "embeddings.npz")
 
         if not os.path.exists(graph_path):
             return False
@@ -179,8 +223,11 @@ class BasinPersistence:
 
         logger.info("Carregando memoria topologica...")
         try:
+            if hasattr(engine, "reopen_stores"):
+                engine.reopen_stores(root)
+
             emb_map = {}
-            ids_path = os.path.join(self.storage_dir, "node_ids.json")
+            ids_path = os.path.join(root, "node_ids.json")
             if os.path.exists(ids_path):
                 with open(ids_path, "r", encoding="utf-8") as f:
                     node_ids_list = json.load(f)
@@ -188,7 +235,6 @@ class BasinPersistence:
                     for nid, vec in zip(node_ids_list, data["vectors"]):
                         emb_map[str(nid)] = vec
             else:
-                # Fallback for legacy format (pre-migration)
                 with np.load(emb_path, allow_pickle=False) as data:
                     for nid, vec in zip(data["ids"], data["vectors"]):
                         emb_map[str(nid)] = vec
@@ -207,7 +253,7 @@ class BasinPersistence:
             for node_id in engine.graph.nodes:
                 engine.graph.nodes[node_id]["embedding"] = emb_map[node_id]
 
-            meta_path = os.path.join(self.storage_dir, "meta.json")
+            meta_path = os.path.join(root, "meta.json")
             meta_build_id = ""
             if os.path.exists(meta_path):
                 with open(meta_path, "r", encoding="utf-8") as f:
@@ -219,7 +265,7 @@ class BasinPersistence:
                 meta = {}
                 engine.encoder_model = ""
 
-            succ_db_path = os.path.join(self.storage_dir, "successor.db")
+            succ_db_path = os.path.join(root, "successor.db")
             if os.path.exists(succ_db_path) and hasattr(engine.successor, "restore_from"):
                 engine.successor.restore_from(succ_db_path)
             elif "successor" in meta:
@@ -237,7 +283,7 @@ class BasinPersistence:
                 else:
                     engine.successor = {}
 
-            attr_db_path = os.path.join(self.storage_dir, "attractor.db")
+            attr_db_path = os.path.join(root, "attractor.db")
             if os.path.exists(attr_db_path) and hasattr(engine.attractor_of, "restore_from"):
                 engine.attractor_of.restore_from(attr_db_path)
             elif "attractor_of" in meta:
@@ -261,27 +307,20 @@ class BasinPersistence:
 
             engine.basins = {}
             preserve_l3: Dict[str, Dict[str, Any]] = {}
-            if not os.path.exists(self.basins_dir) and os.path.exists(self.storage_dir):
-                # Auto-recovery: checa diretórios transitórios se o principal estiver ausente
-                for entry in os.listdir(self.storage_dir):
-                    if entry.startswith("basins.dead") or entry.startswith("basins.tmp"):
-                        cand = os.path.join(self.storage_dir, entry)
-                        if os.path.isdir(cand):
-                            try:
-                                os.rename(cand, self.basins_dir)
-                                logger.info(f"Auto-recuperação bem-sucedida da pasta de bacias a partir de {entry}")
-                                break
-                            except Exception:
-                                pass
-
-            if os.path.exists(self.basins_dir):
-                for fname in os.listdir(self.basins_dir):
+            basins_dir = os.path.join(root, "basins")
+            if os.path.isdir(basins_dir):
+                for fname in os.listdir(basins_dir):
                     if not fname.endswith(".json"):
                         continue
-                    basin_id = fname[:-5]
-                    with open(os.path.join(self.basins_dir, fname), "r", encoding="utf-8") as f:
+                    with open(os.path.join(basins_dir, fname), "r", encoding="utf-8") as f:
                         b_data = json.load(f)
-                    extra = b_data.pop("_meta", {})
+                    extra = b_data.pop("_meta", {}) or {}
+                    basin_id = extra.get("basin_id")
+                    if not basin_id:
+                        stem = fname[:-5]
+                        if ".." in stem or "/" in stem or "\\" in stem:
+                            continue
+                        basin_id = stem
                     basin = TopologicalBasin(basin_id)
                     basin.rho_tree = load_graph(b_data)
                     basin.source = extra.get("source", "")
@@ -308,7 +347,7 @@ class BasinPersistence:
             if expected - set(engine.basins) or not engine.basins:
                 engine.partition_into_basins(preserve_l3=preserve_l3)
 
-            bm25_path = os.path.join(self.storage_dir, "bm25.json")
+            bm25_path = os.path.join(root, "bm25.json")
             from ..indexer.bm25 import BM25Index
 
             engine.bm25 = BM25Index()

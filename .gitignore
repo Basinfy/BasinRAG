@@ -42,4 +42,9 @@ Thumbs.db
 logs/
 gold.*.json
 results/mteb/remote/
+results/mteb_fase*/
+results/mteb_fase*_test*/
+results/mteb_fase*_test2/
+results/mteb_optimized/
+results/mteb_test/
 

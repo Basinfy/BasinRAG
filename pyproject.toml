@@ -29,6 +29,7 @@ ollama = ["langchain-ollama>=0.1.0"]
 openai = ["langchain-openai>=0.1.0"]
 api = ["fastapi>=0.110", "uvicorn>=0.29", "slowapi>=0.1.9"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-cov>=4.1", "mypy>=1.9", "ruff>=0.3"]
+eval = ["mteb>=1.0", "datasets>=2.0", "beir>=2.0"]
 
 [project.scripts]
 basinrag = "basinrag.cli:main"

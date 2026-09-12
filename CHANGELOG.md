@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### CONVERT_C
+- Recolhidos claims públicos de leaderboard. O gate (`results/gate/decision.json`) fixa encoder 0,741 > híbrido 0,727 > pacote publicado 0,650.
+- Persistência por ponteiro `current.json` + builds; `ingest` mescla; API default em localhost.
+
 ## [1.0.4] - 2026-09-09
 
 ### Mathematical Alignment & Formal Rigor
@@ -74,7 +80,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Difusão Espectral Local por Personalized PageRank (PPR)**: Difusão espectral analítica com Power Iteration sobre subgrafo induzido da bacia.
 - **Fusão Canônica Min-Max RRF**: Normalização unificada de escores densos (FAISS) e esparsos (BM25 CSR).
 - **Suíte Oficial de Avaliação e Benchmarks**:
-  - Integração com BEIR Oficial (SciFact — NDCG@10 0.771).
+  - Integração com BEIR/MTEB (SciFact). O número de 50 queries foi recolhido; ver gate CONVERT_C.
   - Avaliação no SWE-bench Lite (Hit@1 30.8%).
   - MTEB Hugging Face (SciFact 300 queries — NDCG@10 0.650, Recall@1000 98.7%).
 - **Infraestrutura Aberta**: Documentação completa (`ARCHITECTURE.md`, `BENCHMARKS.md`, `CONTRIBUTING.md`, `LICENSE` MIT).

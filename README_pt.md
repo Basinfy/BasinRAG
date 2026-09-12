@@ -7,7 +7,7 @@
 [![Tests](https://img.shields.io/badge/tests-56%20passed-brightgreen.svg)](https://github.com/Basinfy/BasinRAG/actions)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![MTEB Score](https://img.shields.io/badge/MTEB-SOTA-brightgreen.svg)](https://huggingface.co/spaces/mteb/leaderboard)
+[![Gate](https://img.shields.io/badge/gate-CONVERT__C-blue.svg)](results/gate/decision.json)
 [![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.22664948-blue.svg)](https://doi.org/10.5281/zenodo.22664948)
 
 **RAG topológico de alta performance para documentos**, utilizando bacias de atração como **partição de índice**.
@@ -64,11 +64,11 @@ O BasinRAG foi concebido desde a sua arquitetura base para suportar ecossistemas
 
 - **Topologia de Grafo Funcional ($\phi$)**: Partição em bacias baseada em fluxo sequencial e quebras adaptativas por similaridade de cosseno.
 - **Arestas Virtuais Semânticas**: Enriquecimento do grafo via $k$-NN semântico com limiar $> 0.85$.
-- **Fusão Híbrida RRF + Hop Prior**: Fusão balanceada ($\alpha=0.55$) de ranking lexical e vetorial penalizada por decaimento exponencial de distância topológica $\exp(-\text{hops} \cdot \lambda)$.
-- **Re-ranking Multilíngue**: Cross-Encoder mMARCO (`mmarco-mMiniLMv2-L12-H384-v1`).
+- **Fusão Híbrida RRF**: BM25 esparso + FAISS denso. Os hops de bacia são vizinhança de briefing, não ganho reivindicado de nDCG.
+- **Re-ranking Multilíngue**: Cross-Encoder (`BAAI/bge-reranker-v2-m3` por padrão).
 - **Roteador Inteligente de Consultas**: Classificação PT/EN (`global` vs `hybrid`) com fast-path regex e fallback de centroides.
 - **Resumos L3 Agentic**: Pipeline com loop *Draft → Critique → Refine*.
-- **Persistência Atômica Transacional**: Substituição segura de diretório (`safe_replace_dir`) prevenindo corrupção em crashes de energia.
+- **Persistência Atômica**: Builds em `storage_dir/builds/<id>/` com `os.replace` de `current.json`.
 - **DiskKVStore com Streaming Paginado**: Armazenamento SQLite com streaming em lotes e liberação imediata de lock, prevenindo OOM.
 - **API REST & WebSocket**: Interface FastAPI protegida com rate limiting, CORS sanitizado e streaming via WebSocket.
 
@@ -91,36 +91,16 @@ O BasinRAG foi concebido desde a sua arquitetura base para suportar ecossistemas
 
 O **BasinRAG** foi submetido a avaliações rigorosas e oficiais nos dois principais ecossistemas de benchmark internacionais: o **Hugging Face MTEB / BEIR** (recuperação científica e zero-shot) e o **Princeton SWE-bench Lite** (localização de bugs em repositórios reais de código de produção).
 
-### 1. Avaliação Comparativa no Leaderboard Global MTEB / BEIR (Dataset: SciFact)
-Avaliação executada via avaliador oficial `beir.retrieval.evaluation.EvaluateRetrieval` e harness oficial `mteb.evaluate` contra o corpus completo de 5.183 documentos científicos:
+### 1. Gate pré-registrado (SciFact, 300 queries de teste)
+Ver [`results/gate/decision.json`](results/gate/decision.json). A topologia **não** entra como ganho de nDCG (`DECISION=CONVERT_C`). As bacias são um mapa de briefing em torno de um índice híbrido BM25+FAISS.
 
-| Modelo / Sistema | Paradigma Arquitetural | nDCG@10 *(Score Oficial)* | Recall@10 | MRR@10 | Tempo Indexação | Latência / Query |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| 🚀 **BasinRAG (Ours)** | **Topologia de Bacias ($\rho$-trees + RRF + Cross-Encoder)** | **0.771** | **85.8%** | **0.750** | **90.8s (CPU)** | **2.5s** |
-| **OpenAI `text-embedding-3-large`** | Dense Bi-Encoder Comercial (3.072d) | 0.725 | 84.1% | 0.702 | N/A (API) | ~0.2s |
-| **BGE-large-en-v1.5** | Bi-Encoder Denso SOTA (BAAI - 335M) | 0.712 | 83.9% | 0.682 | Médio (GPU) | ~1.5s |
-| **HippoRAG** | Hippocampal Knowledge Graph + LLM Triplets | 0.710 | 83.0% | 0.680 | 1.5h (API) | ~4.2s |
-| **SPLADE v2** | Esparso Neural Aprendido (Naver Labs) | 0.692 | 82.8% | 0.665 | Médio (GPU) | ~1.8s |
-| **OpenAI `text-embedding-3-small`** | Dense Bi-Encoder Comercial (1.536d) | 0.690 | 82.0% | 0.665 | N/A (API) | ~0.2s |
-| **Contriever** | Denso Contrastivo (Meta AI) | 0.677 | 81.5% | 0.650 | Baixo (GPU) | ~1.2s |
-| **ColBERT v1** | Late-Interaction Multi-Vetor (Stanford) | 0.671 | 80.2% | 0.640 | Alto (VRAM) | ~2.0s |
-| **BM25 Padrão** | Esparso Estatístico (Robertson et al.) | 0.665 | 78.8% | 0.620 | Mínimo (CPU) | ~0.02s |
-| **OpenAI `text-embedding-ada-002`** | Dense Bi-Encoder Comercial (Legado) | 0.642 | 77.0% | 0.610 | N/A (API) | ~0.2s |
-| **`all-MiniLM-L6-v2` (Puro)** | Bi-Encoder Denso Isolado (22M params) | 0.490 | 65.2% | 0.445 | Rápido (CPU) | ~0.04s |
-| **GraphRAG Baseline** | Grafo Bipartido de Entidades + Co-ocorrência | 0.318 | 59.5% | 0.236 | 276.7s (CPU) | 11.1s |
+| Sistema | nDCG@10 |
+| :--- | :---: |
+| Encoder isolado (`BAAI/bge-base-en-v1.5`) | **0.741** |
+| Híbrido BasinRAG (BM25+FAISS, harness congelado) | **0.727** |
+| Pacote BasinRAG publicado anteriormente | **0.650** |
 
-> **Destaque**: Frente à baseline baseada em Grafo de Conhecimento (GraphRAG), o BasinRAG obteve **+142.5% em NDCG@10 e +217.8% em MRR@10** no SciFact, com tempo de indexação **3.05x menor** e latência de consulta **4.43x inferior**.
-
-### 2. Pacote Oficial MTEB Hugging Face (Todas as 300 Queries de Teste)
-Execução oficial via harness `mteb` v2.20 com ranking exaustivo até $k \le 1000$ (gerado para submissão oficial ao [Hugging Face MTEB Leaderboard](https://huggingface.co/spaces/mteb/leaderboard)):
-
-- **nDCG@10**: **0.650** (0.6497) *(+3.6% sobre a baseline inicial)*
-- **MRR@10**: **0.629** (0.6294) *(+9.1% sobre a baseline inicial)*
-- **MAP@10**: **0.619** (0.6188) *(+9.5% sobre a baseline inicial)*
-- **Hit@1 (Acerto na 1ª posição)**: **57.0%**
-- **Hit@5**: **71.3%** | **Hit@10**: **74.7%**
-- **Recall@100**: **87.0%**
-- **Recall@1000**: **98.7%** (cobertura quase completa do espaço de busca)
+> Encoder > híbrido > publicado. O recorte antigo de 50 queries BEIR não é score oficial. Reproduza com `python -m basinrag.eval.run_gate`.
 
 ### 3. Princeton SWE-bench Lite (Fault Localization em Código de Produção)
 Avaliação de capacidade de localizar arquivos modificados por pull requests reais a partir da descrição do issue (`problem_statement`) em repositórios reais (*Flask*, *Requests*, *Seaborn*, *Pytest*, *Pylint*, *Xarray*):

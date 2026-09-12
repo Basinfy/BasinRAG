@@ -14,7 +14,6 @@ from .functional_graph import (
     rho_parent_child,
     sequential_successor,
     sequential_successor_adaptive,
-    compute_trapping_bounds,
 )
 from .vector_index import build_ip_index
 
@@ -45,28 +44,36 @@ class BasinTopologyEngine:
         import os
         from .kv_store import DiskKVStore
         os.makedirs(self.storage_dir, exist_ok=True)
-        self.successor = DiskKVStore(os.path.join(self.storage_dir, "successor.db"), "successor")
-        self.attractor_of = DiskKVStore(os.path.join(self.storage_dir, "attractor.db"), "attractor_of")
+        self._kv_dir = self.storage_dir
+        self.successor = DiskKVStore(os.path.join(self._kv_dir, "successor.db"), "successor")
+        self.attractor_of = DiskKVStore(os.path.join(self._kv_dir, "attractor.db"), "attractor_of")
         
-        self.meta_basins: Dict[str, Any] = {}
         self.section_size = section_size
         self.max_hops = max_hops
         self.bm25 = None
         self.encoder_model: str = ""
         self.build_id: str = ""
 
-    def cosine_similarity(self, v1: np.ndarray, v2: np.ndarray) -> float:
-        dot = np.dot(v1, v2)
-        norm1 = np.linalg.norm(v1)
-        norm2 = np.linalg.norm(v2)
-        if norm1 == 0 or norm2 == 0:
-            return 0.0
-        return float(dot / (norm1 * norm2))
+    def close_stores(self) -> None:
+        for store in (getattr(self, "successor", None), getattr(self, "attractor_of", None)):
+            if store is not None and hasattr(store, "close"):
+                try:
+                    store.close()
+                except Exception:
+                    pass
+
+    def reopen_stores(self, directory: Optional[str] = None) -> None:
+        import os
+        from .kv_store import DiskKVStore
+        self.close_stores()
+        self._kv_dir = directory or self.storage_dir
+        os.makedirs(self._kv_dir, exist_ok=True)
+        self.successor = DiskKVStore(os.path.join(self._kv_dir, "successor.db"), "successor")
+        self.attractor_of = DiskKVStore(os.path.join(self._kv_dir, "attractor.db"), "attractor_of")
 
     def reset(self) -> None:
         self.graph.clear()
         self.basins = {}
-        self.meta_basins = {}
         if hasattr(self, 'successor') and hasattr(self.successor, 'clear'):
             self.successor.clear()
         if hasattr(self, 'attractor_of') and hasattr(self.attractor_of, 'clear'):
@@ -74,15 +81,13 @@ class BasinTopologyEngine:
         self.bm25 = None
         self.build_id = ""
 
-    def build_meta_basins(self, similarity_threshold: float = 0.70) -> None:
-        """Constrói Meta-Bacias Nível 2 conectando atratores entre múltiplos documentos."""
-        from ..retriever.meta_basins import build_meta_basins
-        self.meta_basins = build_meta_basins(self, similarity_threshold=similarity_threshold)
-
-
     def build_graph(self, chunks: List[Dict[str, Any]]):
         """Rebuild from chunks. Always clears first so re-ingest cannot append."""
         self.reset()
+        self.merge_graph(chunks)
+
+    def merge_graph(self, chunks: List[Dict[str, Any]]):
+        """Add or update chunks without wiping existing nodes, then rebuild φ and edges."""
         if not chunks:
             return
 
@@ -103,10 +108,15 @@ class BasinTopologyEngine:
                 basin_id="",
             )
 
+        self.graph.remove_edges_from(list(self.graph.edges()))
         by_source: Dict[str, List[str]] = defaultdict(list)
-        for chunk in chunks:
-            src = chunk.get("source") or "_anon"
-            by_source[src].append(chunk["id"])
+        indexed: Dict[str, List] = defaultdict(list)
+        for nid, data in self.graph.nodes(data=True):
+            indexed[data.get("source") or "_anon"].append(
+                (int(data.get("chunk_index", 0)), nid)
+            )
+        for src, pairs in indexed.items():
+            by_source[src] = [nid for _, nid in sorted(pairs)]
 
         for ids in by_source.values():
             for i in range(len(ids) - 1):
@@ -198,9 +208,7 @@ class BasinTopologyEngine:
             valid_members = []
             for nid in valid_members_for_src:
                 hop = hops.get(nid, 0)
-                is_trapped = compute_trapping_bounds(hop, max_hops=self.max_hops)
                 self.graph.nodes[nid]["hops"] = hop
-                self.graph.nodes[nid]["is_peripheral"] = not is_trapped
                 valid_members.append(nid)
                 basin.add_node(nid, hop, dict(self.graph.nodes[nid]))
                 

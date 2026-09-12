@@ -195,7 +195,6 @@ class CodeRepoIngestor:
         rag.engine.encoder_model = rag.config.encoder_model
         rag.engine.build_graph(nodes)
         rag.engine.partition_into_basins()
-        rag.engine.build_meta_basins()
         rag._attach_bm25()
         rag.retriever = None
 

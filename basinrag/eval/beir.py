@@ -16,15 +16,16 @@ def download_and_unzip_beir_dataset(dataset_name: str, out_dir: str = ".basinrag
         if not os.path.exists(zip_path):
             url = f"{BEIR_DATASETS_URL}{dataset_name}.zip"
             print(f"Baixando dataset BEIR '{dataset_name}' de {url} ...")
-            import ssl
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            with urllib.request.urlopen(url, context=ctx) as response, open(zip_path, 'wb') as out_file:
+            with urllib.request.urlopen(url) as response, open(zip_path, 'wb') as out_file:
                 out_file.write(response.read())
             
         print(f"Descompactando {zip_path}...")
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            dest_abs = os.path.abspath(out_dir)
+            for member in zip_ref.infolist():
+                target = os.path.abspath(os.path.join(out_dir, member.filename))
+                if not (target == dest_abs or target.startswith(dest_abs + os.sep)):
+                    raise ValueError(f"zip-slip rejeitado: {member.filename}")
             zip_ref.extractall(out_dir)
             
     return extract_dir
@@ -139,7 +140,6 @@ def ingest_beir_corpus(rag, corpus: Dict[str, str], batch_size: int = 128) -> in
     rag.engine.encoder_model = rag.config.encoder_model
     rag.engine.build_graph(nodes)
     rag.engine.partition_into_basins()
-    rag.engine.build_meta_basins()
     rag._attach_bm25()
     rag.retriever = None
 

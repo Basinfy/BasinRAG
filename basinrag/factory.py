@@ -18,18 +18,15 @@ from .retriever.briefing import BriefingPacket
 class BasinRAGConfig:
     provider: str = "ollama"
     model_name: str = "qwen2.5"
-    encoder_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
-    reranker_model: str = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
+    encoder_model: str = "BAAI/bge-base-en-v1.5"
+    reranker_model: str = "BAAI/bge-reranker-v2-m3"
     storage_dir: str = ".basinrag"
     search_type: str = "auto"
     chunk_size: int = 1000
     chunk_overlap: int = 100
-    hybrid_alpha: float = 0.55
-    rrf_k: int = 60
-    similarity_threshold: float = 0.55
-    knn_threshold: float = 0.85
     min_confidence: float = 0.15
-    hop_lambda: float = 0.35
+
+
 class BasinRAG:
     """Facade unica para todo o sistema BasinRAG."""
 
@@ -37,7 +34,11 @@ class BasinRAG:
         self.config = config or BasinRAGConfig()
         self.engine = BasinTopologyEngine(storage_dir=self.config.storage_dir)
         self.persistence = BasinPersistence(self.config.storage_dir)
-        self.ingestor = BasinIngestor(self.config.encoder_model)
+        self.ingestor = BasinIngestor(
+            self.config.encoder_model,
+            chunk_size=self.config.chunk_size,
+            chunk_overlap=self.config.chunk_overlap,
+        )
         self.llm = None
         self.summarizer = BasinSummarizer(
             self.engine,
@@ -80,36 +81,50 @@ class BasinRAG:
 
     def _attach_bm25(self) -> None:
         ids = list(self.engine.graph.nodes)
-        texts = [
-            f"{self.engine.graph.nodes[n].get('l1', '')} {self.engine.graph.nodes[n].get('text', '')}".strip()
-            for n in ids
-        ]
+        texts = [self.engine.graph.nodes[n].get("text", "") for n in ids]
         index = BM25Index()
         index.build(ids, texts)
         self.engine.bm25 = index
 
-    def ingest(self, path: str) -> int:
-        """Ingest a file or directory, replacing any in-memory graph."""
+    def _load_nodes(self, path: str):
         import os
         if os.path.isdir(path):
-            nodes = self.ingestor.ingest_directory(path)
+            return self.ingestor.ingest_directory(path)
+        return self.ingestor.ingest(path)
+
+    def ingest(self, path: str) -> int:
+        """Merge new documents into the existing graph. Use reindex() to rebuild from scratch."""
+        nodes = self._load_nodes(path)
+        if not nodes:
+            logger.info("Nenhum documento ingerido; o indice anterior foi preservado.")
+            return 0
+        self.engine.encoder_model = self.config.encoder_model
+        if self.engine.graph.number_of_nodes() == 0:
+            self.engine.build_graph(nodes)
         else:
-            nodes = self.ingestor.ingest(path)
+            self.engine.merge_graph(nodes)
+        self.engine.partition_into_basins()
+        self._attach_bm25()
+        self.retriever = None
+        self.persistence.save_topology(self.engine)
+        logger.info(
+            "Resumos L3 LLM serao gerados em background ao iniciar "
+            "'basinrag chat' ou 'basinrag serve'. L3 extractivo ja esta no indice."
+        )
+        return len(nodes)
+
+    def reindex(self, path: str) -> int:
+        """Wipe the graph and rebuild from path."""
+        nodes = self._load_nodes(path)
         if not nodes:
             logger.info("Nenhum documento ingerido; o indice anterior foi preservado.")
             return 0
         self.engine.encoder_model = self.config.encoder_model
         self.engine.build_graph(nodes)
         self.engine.partition_into_basins()
-        self.engine.build_meta_basins()
         self._attach_bm25()
         self.retriever = None
         self.persistence.save_topology(self.engine)
-
-        logger.info(
-            "Resumos L3 LLM serao gerados em background ao iniciar "
-            "'basinrag chat' ou 'basinrag serve'. L3 extractivo ja esta no indice."
-        )
         return len(nodes)
 
     def _get_semaphore(self) -> asyncio.Semaphore:
@@ -118,37 +133,46 @@ class BasinRAG:
         return self._inference_semaphore
 
     def query(self, question: str, search_type: str = None, top_k: int = None) -> list:
-        self._ensure_retriever(search_type, top_k)
-        return self.retriever.invoke(question)
+        self._ensure_retriever()
+        packet = self.retriever.brief(question, search_type=search_type, top_k=top_k)
+        from langchain_core.documents import Document
+        docs = []
+        for i, text in enumerate(packet.texts_for_rerank()[: (top_k or self.retriever.top_k)]):
+            meta = {}
+            if i < len(packet.node_ids):
+                nid = packet.node_ids[i]
+                if nid in self.engine.graph:
+                    node_data = self.engine.graph.nodes[nid]
+                    meta = dict(node_data.get("metadata") or {})
+                    meta["node_id"] = nid
+                    meta["source"] = node_data.get("source", "")
+                    meta["doc_id"] = meta.get("doc_id") or node_data.get("source", "")
+            docs.append(Document(page_content=text, metadata=meta))
+        return docs
 
     async def aquery(self, question: str, search_type: str = None, top_k: int = None) -> list:
-        """Versão assíncrona não-bloqueante de query executada em worker thread."""
-        self._ensure_retriever(search_type, top_k)
+        self._ensure_retriever()
         async with self._get_semaphore():
-            return await asyncio.to_thread(self.retriever.invoke, question)
+            return await asyncio.to_thread(self.query, question, search_type, top_k)
 
     def brief(self, question: str, search_type: str = None, top_k: int = None) -> BriefingPacket:
-        self._ensure_retriever(search_type, top_k)
-        return self.retriever.brief(question)
+        self._ensure_retriever()
+        return self.retriever.brief(question, search_type=search_type, top_k=top_k)
 
     async def abrief(self, question: str, search_type: str = None, top_k: int = None) -> BriefingPacket:
-        """Versão assíncrona não-bloqueante de brief executada em worker thread."""
-        self._ensure_retriever(search_type, top_k)
+        self._ensure_retriever()
         async with self._get_semaphore():
-            return await asyncio.to_thread(self.retriever.brief, question)
+            return await asyncio.to_thread(self.retriever.brief, question, search_type, top_k)
 
     def _ensure_retriever(self, search_type: str = None, top_k: int = None) -> None:
-        resolved_type = search_type if search_type is not None else self.config.search_type
         if self.retriever is None:
             self.retriever = BasinRAGRetriever(
                 engine=self.engine,
                 encoder=self.ingestor.encoder,
-                search_type=resolved_type,
-                top_k=top_k if top_k is not None else 5,
+                search_type=self.config.search_type,
+                top_k=5,
                 reranker_model=self.config.reranker_model,
             )
-            return
-        self.retriever.configure(search_type=resolved_type, top_k=top_k)
 
     async def start_background_summarizer(self, verbose: bool = False):
         await self.summarizer.summarize_missing_background(

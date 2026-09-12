@@ -1,8 +1,10 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, HTTPException, Query
+from collections import defaultdict
+from fastapi import FastAPI, WebSocket, HTTPException
 from pydantic import BaseModel, Field
 from typing import List
 import asyncio
+import time
 from ..logging_config import setup_logging
 
 logger = setup_logging()
@@ -17,6 +19,31 @@ import os
 import secrets
 
 _rag_instance: BasinRAG | None = None
+PUBLIC_BIND_HOSTS = {"0.0.0.0", "::", "[::]"}
+_DEFAULT_CORS = (
+    "http://localhost,http://127.0.0.1,"
+    "http://localhost:3000,http://127.0.0.1:3000,"
+    "http://localhost:8000,http://127.0.0.1:8000"
+)
+_ws_hits: dict[str, list[float]] = defaultdict(list)
+
+
+def require_api_key_for_public_bind(host: str) -> None:
+    if host in PUBLIC_BIND_HOSTS and not os.environ.get("BASINRAG_API_KEY"):
+        raise RuntimeError(
+            "Bind publico exige BASINRAG_API_KEY. Use --host 127.0.0.1 ou defina a chave."
+        )
+
+
+def _ws_rate_allowed(ip: str, limit: int = 30, window: int = 60) -> bool:
+    now = time.time()
+    hits = [t for t in _ws_hits[ip] if now - t < window]
+    if len(hits) >= limit:
+        _ws_hits[ip] = hits
+        return False
+    hits.append(now)
+    _ws_hits[ip] = hits
+    return True
 
 
 class QueryRequest(BaseModel):
@@ -60,11 +87,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="BasinRAG API",
-    description="Topological RAG API",
+    description="Hybrid RAG API (basins as briefing map)",
     lifespan=lifespan,
 )
 
-cors_origins = [o.strip() for o in os.environ.get("BASINRAG_CORS_ORIGINS", "*").split(",") if o.strip()]
+cors_origins = [
+    o.strip()
+    for o in os.environ.get("BASINRAG_CORS_ORIGINS", _DEFAULT_CORS).split(",")
+    if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
@@ -78,6 +109,7 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 API_KEY = os.environ.get("BASINRAG_API_KEY")
+
 
 async def verify_api_key(x_api_key: str = Header(None)):
     if API_KEY:
@@ -103,10 +135,17 @@ async def query_endpoint(request: Request, body: QueryRequest):
     return {"results": [d.page_content for d in docs]}
 
 
-
 @app.websocket("/chat")
-async def websocket_chat(websocket: WebSocket, token: str = Query(None)):
+async def websocket_chat(websocket: WebSocket):
+    client = websocket.client.host if websocket.client else "unknown"
+    if not _ws_rate_allowed(client):
+        await websocket.close(code=1008, reason="Rate limited")
+        return
     if API_KEY:
+        token = websocket.headers.get("x-api-key") or ""
+        auth = websocket.headers.get("authorization") or ""
+        if auth.lower().startswith("bearer "):
+            token = token or auth[7:]
         if not token or not secrets.compare_digest(token, API_KEY):
             await websocket.close(code=1008, reason="Unauthorized")
             return
@@ -124,4 +163,3 @@ async def websocket_chat(websocket: WebSocket, token: str = Query(None)):
         await websocket.close(code=1000, reason="Timeout")
     except Exception:
         logger.exception("WebSocket desconectado com erro")
-

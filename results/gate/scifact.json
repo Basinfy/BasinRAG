@@ -1,0 +1,46 @@
+{
+  "basins": {
+    "n_nodes": 5183,
+    "n_basins": 5183,
+    "n_sources": 5183,
+    "median_members": 1.0,
+    "mean_members": 1.0,
+    "max_members": 1,
+    "singleton_frac": 1.0,
+    "mean_hops": 0.0,
+    "size_histogram": {
+      "1": 5183
+    },
+    "gate_geometry_ok": false
+  },
+  "metrics": {
+    "encoder_pure": {
+      "ndcg@10": 0.7405373670881416,
+      "mrr@10": 0.7035529100529099,
+      "recall@10": 0.8742222222222221,
+      "hit@10": 0.8833333333333333,
+      "n_queries": 300
+    },
+    "bm25_pure": {
+      "ndcg@10": 0.6749132513483315,
+      "mrr@10": 0.6409365079365079,
+      "recall@10": 0.8019999999999999,
+      "hit@10": 0.8233333333333334,
+      "n_queries": 300
+    },
+    "hybrid_min": {
+      "ndcg@10": 0.7273951028790474,
+      "mrr@10": 0.6901468253968251,
+      "recall@10": 0.8641111111111112,
+      "hit@10": 0.88,
+      "n_queries": 300
+    },
+    "hybrid_min_topo": {
+      "ndcg@10": 0.733127791414867,
+      "mrr@10": 0.6936521164021163,
+      "recall@10": 0.8746666666666666,
+      "hit@10": 0.89,
+      "n_queries": 300
+    }
+  }
+}

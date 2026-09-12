@@ -11,9 +11,12 @@
 
 O **BasinRAG** é uma arquitetura de RAG topológica fundamentada na teoria de **grafos funcionais discretos e bacias de atração**. Diferente das abordagens tradicionais que se dividem entre *Dense Embeddings puros* (OpenAI, BGE, Cohere) e *Knowledge Graphs dirigidos por LLMs* (Microsoft GraphRAG, HippoRAG, LightRAG), o BasinRAG introduz uma terceira via: **estruturação topológica determinística sem custo de LLM na indexação**.
 
+### Errata CONVERT_C
+O gate pré-registrado (`results/gate/decision.json`) recolhe os claims de leaderboard deste relatório. SciFact: encoder 0,741 > híbrido 0,727 > pacote publicado 0,650. A topologia não entra como ganho de nDCG.
+
 ### Principais Destaques Frente ao Cenário Global:
-1. **Comparativo com Abordagens de Grafo de Conhecimento:** Em relação ao baseline GraphRAG, o BasinRAG registrou **+142,5% em NDCG@10** e **+217,8% em MRR@10** no benchmark SciFact (BEIR), com tempo de construção de índice **3,05x menor** e latência de busca **4,43x inferior**.
-2. **Eficiência Paramétrica Extrema:** Utilizando um encoder de apenas **22 milhões de parâmetros** (`all-MiniLM-L6-v2`), o BasinRAG atingiu **0.650 de NDCG@10** e **0.629 de MRR@10** no MTEB (300 queries completas, $top\_k=1000$), rivalizando com modelos densos de 300M+ parâmetros e superando modelos comerciais de 1536 dimensões sem enriquecimento topológico.
+1. **Produto:** híbrido BM25+FAISS com bacias como mapa de briefing, não como evidência topológica de ranking.
+2. **Encoder de referência:** `BAAI/bge-base-en-v1.5` (768d) supera o híbrido no SciFact (1 doc = 1 nó, $h(v)=0$).
 3. **Indexação Local sem Dependência de LLM ($0.00):** Enquanto abordagens baseadas em extração contínua de entidades e resumos comunitários demandam sucessivas chamadas a modelos de linguagem na etapa de ingestão, o BasinRAG realiza a partição topológica via representações métricas $L_2$ e componentes funcionais determinísticos de forma estritamente matemática e local em menos de 100 segundos.
 4. **Precisão em Engenharia de Software (SWE-bench):** O índice topológico de bacias dobrou a taxa de acerto no topo (**Hit@1 subiu de 15,4% para 30,8%**) e alcançou **84,6% de Hit@10** na localização de arquivos com bugs em bases de código de grande porte.
 
@@ -25,7 +28,7 @@ Abaixo está o mapeamento detalhado comparando o BasinRAG contra os quatro grand
 
 | Sistema / Modelo | Família Arquitetural | Parâmetros / Dimensão | NDCG@10 (SciFact MTEB/BEIR) | MRR@10 (SciFact) | Custo de Indexação (por 10k docs) | Latência Média de Query | Requer LLM no Index? |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **BasinRAG (Ours)** | **Topological Functional Graph + BM25 + CE** | **22M** (384d) | **0.771** *(BEIR-50)*<br>**0.650** *(MTEB-300)* | **0.750** *(BEIR-50)*<br>**0.629** *(MTEB-300)* | **$0.00** *(Zero chamadas)* | **2,506 ms** *(com CE)* | ❌ Não |
+| **BasinRAG (híbrido, gate)** | **BM25 + FAISS (bacias = mapa)** | **110M** (768d) | **0.727** *(gate SciFact)* | — | **$0.00** *(Zero chamadas)* | — | ❌ Não |
 | **Microsoft GraphRAG** | Knowledge Graph (Leiden Clusters + LLM) | N/A (GPT-4o) | **0.318** | **0.236** | **\$35.00 – \$80.00** | **10,063 ms** | ✅ Sim (Pesado) |
 | **HippoRAG** | Hippocampal Graph + LLM Triplets + PPR | N/A (Triplas LLM) | **0.710** | **0.680** | **\$15.00 – \$40.00** | **4,200 ms** | ✅ Sim (Médio) |
 | **LightRAG** | Dual-Level Knowledge Graph + LLM | N/A (GPT-4o mini) | **0.685** | **0.640** | **\$8.00 – \$25.00** | **3,100 ms** | ✅ Sim |
@@ -38,7 +41,7 @@ Abaixo está o mapeamento detalhado comparando o BasinRAG contra os quatro grand
 | **`all-MiniLM-L6-v2` (Puro)** | Dense Bi-Encoder Isolado | 22M (384d) | **0.490** | **0.445** | **$0.00** | **35 ms** | ❌ Não |
 
 > [!NOTE]
-> Observe o salto do `all-MiniLM-L6-v2` isolado (**0.490**) para o BasinRAG (**0.650 – 0.771**). O ganho de **+32,6% a +57,3%** decorre puramente da arquitetura de **Bacias de Atração, fusão RRF com Hop Prior topológico e reclassificação Cross-Encoder**.
+> Gate CONVERT_C: encoder isolado 0,741 > híbrido 0,727 > pacote publicado 0,650. A topologia não justifica o ranking no SciFact.
 
 ---
 
@@ -59,31 +62,21 @@ graph TD
         B1["Ingestão de Textos"] --> B2["Embedding 384d L2 + Grafo Funcional<br>(Determinístico, Custo Zero)"]
         B2 --> B3["Decomposição de Bacias Funcionais<br>(Componentes fortemente conexos em O(V+E))"]
         B3 --> B4["Multi-Level Condensation (L0-L3)<br>(Topological Hop Prior)"]
-        B4 --> B5["Busca Híbrida RRF + Cross-Encoder<br>(Latência: 2.506ms | NDCG: 0.771)"]
+        B4 --> B5["Busca Híbrida BM25 + FAISS<br>(gate SciFact nDCG: 0.727)"]
     end
 ```
 
-### Resultados Numéricos Comparativos (BEIR SciFact):
+### Resultados do gate (SciFact, 300 queries)
 
 ```
-NDCG@10:
-  BasinRAG:  ████████████████████ 0.771 (+142.5%)
-  GraphRAG:  ████████ 0.318
-
-MRR@10:
-  BasinRAG:  ███████████████████ 0.750 (+217.8%)
-  GraphRAG:  ██████ 0.236
-
-Tempo de Construção do Grafo (5.183 docs):
-  BasinRAG:  ████ 90.8s (3.05x mais rápido)
-  GraphRAG:  ██████████████ 276.7s
-
-Latência por Consulta:
-  BasinRAG:  ████ 2.498ms (4.43x mais rápido)
-  GraphRAG:  ████████████████ 11.059ms
+nDCG@10:
+  encoder  BAAI/bge-base-en-v1.5   0.741
+  híbrido  BM25+FAISS              0.727
+  publicado BasinRAG 1.0.4         0.650
+  DECISION=CONVERT_C
 ```
 
-### Análise de Fatores de Desempenho no SciFact (0.318 vs 0.771)
+### Análise de Fatores de Desempenho no SciFact
 1. **Sensibilidade na Extração Automatizada de Entidades:** Métodos que dependem de extração de entidades via prompts de LLM podem apresentar variações de normalização em termos biomédicos especializados (siglas, nomes de compostos). Quando variantes de uma mesma entidade não são unificadas, o grafo perde continuidade estrutural.
 2. **Granularidade da Síntese Comunitária:** Resumos gerados no nível de comunidade agregam informações em alto nível conceitual, o que pode atenuar detalhes específicos necessários para a verificação rigorosa de alegações científicas (*claim verification*).
 3. **Alinhamento do Grafo Funcional do BasinRAG:** O BasinRAG opera diretamente sobre os fragmentos de texto originais preservando a adjacência e a proximidade vetorial, combinadas com ponderação léxica BM25 e reclassificação neural, mantendo a fidelidade das evidências originais.

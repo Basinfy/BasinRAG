@@ -1,6 +1,6 @@
 # Arquitetura do BasinRAG
 
-Este documento detalha o design do sistema, a fundamentação matemática e as escolhas de engenharia por trás do **BasinRAG**, um sistema state-of-the-art de RAG (Retrieval-Augmented Generation) Topológico para processamento determinístico e escalável de documentos complexos.
+Este documento descreve o sistema que existe após o gate CONVERT_C: um RAG híbrido **BM25 + FAISS**, com bacias de atração usadas como **mapa de briefing** (vizinhança de contexto), não como evidência de ganho de nDCG.
 
 ## 1. Visão Geral e Filosofia Arquitetural
 
@@ -51,7 +51,7 @@ O sistema consolida a extração de forma multiformato num indexador altamente o
 * **Ingestão e Splitting Determinístico:** Suporte robusto para PDF, MD, e TXT. O documento é segmentado de maneira hierárquica (1000 caracteres / 100 caracteres de overlap). Para evitar recálculos redundantes e permitir consistência transacional, IDs determinísticos baseados em **SHA-256** são usados como chaves primárias.
 * **Representação Híbrida Avançada:**
   * **Esparsa:** Matrizes CSR para indexação eficiente BM25, rigorosamente calibradas para vocabulário denso ($k_1 = 1.2$, $b = 0.75$).
-  * **Densa:** Encoders MiniLM bilíngues (L2-normalizados), indexados utilizando o padrão ouro via **FAISS** em índices `FlatIP` e `HNSW` para suporte de vizinhança de alta performance.
+  * **Densa:** Encoder default `BAAI/bge-base-en-v1.5` (768d, L2-normalizado), indexado via **FAISS** (`FlatIP` / `HNSW`).
 * **Condensação de Contexto Multinível:** O BasinRAG estrutura os metadados do embedding numa hierarquia piramidal:
   * L0: Texto integral.
   * L1: Keywords lexicais purificadas.
@@ -93,10 +93,11 @@ O BasinRAG inclui um Daemon concorrente para resumir o conteúdo recuperado, est
 
 ## 6. Persistência Atômica e Concorrência
 
-Para suportar ambientes pesados:
-* Implementação com integridade via substituição atômica nos sistemas de arquivos (`os.replace`).
-* Isolamento de cache de busca em banco KVStore nativo (SQLite), transacionado rigidamente com WAL (Write-Ahead Logging).
-* Suporte total à segurança de thread no loop I/O. Recuperação instântanea sem corrupção no caso de crash elétrico/de processo.
+* Cada save escreve um diretório `storage_dir/builds/<build_id>/` (grafo, embeddings, BM25, SQLite, bacias).
+* A atomicidade é o `os.replace` de `current.json` apontando para o build ativo — não um rename do diretório inteiro (isso quebra no Windows com SQLite aberto).
+* `successor` / `attractor_of` são fechados antes da troca do ponteiro e reabertos no build novo.
+* `basin_id` é hasheado no nome do arquivo; o id real vive em `_meta`.
+* `ingest()` mescla nós por `id`; `reindex(path)` reconstrói do zero.
 
 ## 7. Complexidade Algorítmica e Escalabilidade
 

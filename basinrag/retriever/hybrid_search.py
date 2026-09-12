@@ -29,27 +29,17 @@ class HybridSearch:
         texts = [n[1].get("text", "") for n in nodes]
         self._bm25.build(ids, texts)
 
-    def search(
-        self,
-        query: str,
-        query_embedding: np.ndarray,
-        top_k: int = 5,
-        return_ids: bool = False,
-    ) -> List[Any]:
-        ranked = self.search_nodes(query, query_embedding, top_k=top_k)
-        if return_ids:
-            return ranked
-        return [r["text"] for r in ranked]
-
     def search_nodes(
         self,
         query: str,
         query_embedding: np.ndarray,
         top_k: int = 5,
+        use_hop_prior: bool = True,
+        use_confidence_gate: bool = True,
     ) -> List[Dict[str, Any]]:
         if self._bm25 is None or self._bm25.n == 0:
             hits = self.local_search.dense_hits(query_embedding, top_k=top_k)
-            if not hits or hits[0]["score"] < MIN_CONFIDENCE:
+            if use_confidence_gate and (not hits or hits[0]["score"] < MIN_CONFIDENCE):
                 return []
             return hits
 
@@ -61,16 +51,28 @@ class HybridSearch:
 
         best_dense = semantic[0]["score"] if semantic else 0.0
         best_bm25 = bm25_hits[0][1] if bm25_hits else 0.0
-        if best_dense < MIN_CONFIDENCE and best_bm25 < 0.5:
+        if use_confidence_gate and best_dense < MIN_CONFIDENCE and best_bm25 < 0.5:
             return []
 
-        hops = {
-            nid: int(self.engine.graph.nodes[nid].get("hops", 0))
-            for nid in set(bm25_ids) | set(semantic_ids)
-            if nid in self.engine.graph
-        }
+        # Dynamic geodesic hops from top query seeds
+        all_candidate_ids = set(bm25_ids) | set(semantic_ids)
+        seeds = (set(semantic_ids[:3]) | set(bm25_ids[:3])) & all_candidate_ids
+        if not seeds:
+            seeds = set(list(all_candidate_ids)[:3])
+
+        from collections import deque
+        hops: Dict[str, int] = {s: 0 for s in seeds}
+        q_bfs = deque((s, 0) for s in seeds)
+        while q_bfs:
+            curr, d = q_bfs.popleft()
+            if curr in self.engine.graph:
+                for nbr in self.engine.graph.neighbors(curr):
+                    if nbr in all_candidate_ids and nbr not in hops:
+                        hops[nbr] = d + 1
+                        q_bfs.append((nbr, d + 1))
+
         scores = weighted_rrf(bm25_ids, semantic_ids)
-        scores = apply_hop_prior(scores, hops)
+        scores = apply_hop_prior(scores, hops, enabled=use_hop_prior)
         order = ranked_ids(scores, top_k)
 
         dense_map = {item["id"]: max(0.0, float(item["score"])) for item in semantic}

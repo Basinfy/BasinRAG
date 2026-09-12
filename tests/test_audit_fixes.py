@@ -8,8 +8,8 @@ from basinrag.core.llm import UniversalLLM
 
 def test_version_alignment():
     """Valida alinhamento da versão 1.0.3 no __init__ e consistência do pacote."""
-    assert __version__ == "1.0.3"
-    assert basinrag.__version__ == "1.0.3"
+    assert __version__ == "1.0.4"
+    assert basinrag.__version__ == "1.0.4"
 
 
 def test_cli_version_flag():
@@ -22,7 +22,7 @@ def test_cli_version_flag():
         text=True,
     )
     assert result.returncode == 0
-    assert "1.0.3" in result.stdout or "1.0.3" in result.stderr
+    assert "1.0.4" in result.stdout or "1.0.4" in result.stderr
 
 
 def test_safe_replace_dir_preserves_subdirectories(tmp_path):

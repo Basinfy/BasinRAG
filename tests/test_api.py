@@ -71,13 +71,13 @@ def test_websocket_chat_auth_and_disconnect(client, mock_rag):
     mock_rag.chat = fake_chat
 
     with patch("basinrag.api.server.API_KEY", "secret123"):
-        # Unauthorized without token
+        # Unauthorized without header
         with pytest.raises(Exception):
             with client.websocket_connect("/chat"):
                 pass
 
-        # Authorized with token
-        with client.websocket_connect("/chat?token=secret123") as ws:
+        # Authorized with header (token must not live in the query string)
+        with client.websocket_connect("/chat", headers={"X-API-Key": "secret123"}) as ws:
             ws.send_text("olá")
             t1 = ws.receive_text()
             t2 = ws.receive_text()

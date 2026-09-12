@@ -121,13 +121,6 @@ def detect_attractors(successor: Dict[str, Optional[str]]) -> Dict[str, str]:
             
     return assigned
 
-def compute_trapping_bounds(hops: int, max_hops: int = 50) -> bool:
-    """Evaluate if a node falls within the trapping bound for retrieval expansion (False if peripheral).
-    
-    This function does NOT delete or prune nodes from the graph/index.
-    """
-    return 0 <= hops <= max_hops
-
 def reverse_hops(
     successor: Dict[str, Optional[str]],
     attractor_of: Dict[str, str],

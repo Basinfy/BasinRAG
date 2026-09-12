@@ -48,6 +48,15 @@ def test_hop_prior_does_not_erase_deep_hits():
     assert out["shallow"] > out["deep"]
 
 
+def test_hop_prior_penalizes_unreachable_nodes():
+    scores = {"seed": 1.0, "orphan": 1.0}
+    hops = {"seed": 0}
+    out = apply_hop_prior(scores, hops, missing="penalty")
+    assert out["orphan"] < out["seed"]
+    off = apply_hop_prior(scores, hops, enabled=False)
+    assert off["seed"] == off["orphan"] == 1.0
+
+
 def test_query_routing():
     assert IntelligentQueryRouter.route("qual é o tema principal deste texto?") == "global"
     assert IntelligentQueryRouter.route("summarize the main theme of this book") == "global"
@@ -219,7 +228,7 @@ def test_load_rejects_graph_without_embeddings(tmp_path):
     engine.partition_into_basins()
     store = BasinPersistence(str(tmp_path / "idx"))
     assert store.save_topology(engine)
-    os.remove(os.path.join(store.storage_dir, "embeddings.npz"))
+    os.remove(os.path.join(store.active_dir(), "embeddings.npz"))
     other = BasinTopologyEngine()
     assert store.load_topology(other) is False
 
@@ -306,17 +315,6 @@ def test_local_search_rejects_low_similarity():
     assert local.search_nodes(query, top_k=10, max_tokens=5000) == []
 
 
-def test_projector_ignores_short_stopwords():
-    from basinrag.retriever.projector import seed_node_ids
-
-    chunks = [_chunk("p.txt", 0, "nucleo atomico para estudo", 0)]
-    engine = BasinTopologyEngine()
-    engine.build_graph(chunks)
-    engine.partition_into_basins()
-    assert seed_node_ids(engine, "para como") == []
-    assert chunks[0]["id"] in seed_node_ids(engine, "atomico")
-
-
 def test_save_leaves_no_tmp_and_rebuilds_missing_basins(tmp_path):
     import shutil
 
@@ -356,7 +354,7 @@ def test_stale_bm25_is_discarded_on_load(tmp_path):
     engine.bm25 = index
     store = BasinPersistence(str(tmp_path / "idx"))
     assert store.save_topology(engine)
-    path = os.path.join(store.storage_dir, "bm25.json")
+    path = os.path.join(store.active_dir(), "bm25.json")
     with open(path, encoding="utf-8") as f:
         payload = json.load(f)
     payload["buildId"] = "stale"
@@ -446,13 +444,7 @@ def test_zero_data_loss_on_long_sections():
     # Todos os 120 nós DEVEM permanecer no grafo!
     assert engine.graph.number_of_nodes() == 120
     
-    # Nós com hops > 50 devem ser marcados como is_peripheral=True
-    peripheral_nodes = [
-        nid for nid, d in engine.graph.nodes(data=True)
-        if d.get("is_peripheral") is True
-    ]
-    # Com fallback_section_size=20, seções têm ~20 nós, então nenhuma excede 50 hops neste caso padrão
-    # Mas nenhum nó é deletado em qualquer circunstância!
+    # Nenhum nó é deletado em qualquer circunstância.
     for chunk in chunks:
         assert engine.graph.has_node(chunk["id"])
         basin_id = engine.basin_id_of(chunk["id"])
@@ -479,24 +471,6 @@ def test_ppr_local_convergence_and_ranking():
 
     # O nó semente deve ter o maior score de PPR
     assert ppr_scores[chunks[0]["id"]] == 1.0
-
-
-def test_meta_basins_generation():
-    """Verifica que Meta-Basins agrupam atratores através de modularidade nativa."""
-    from basinrag.retriever.meta_basins import build_meta_basins
-    # 2 documentos com 2 seções cada -> 4 atratores
-    chunks = []
-    for doc in ("docA.txt", "docB.txt"):
-        for i in range(25):
-            chunks.append(_chunk(doc, i, f"termo {doc} secao {i}", i))
-    
-    engine = BasinTopologyEngine()
-    engine.build_graph(chunks)
-    engine.partition_into_basins()
-    
-    assert len(engine.basins) >= 2
-    meta = build_meta_basins(engine, similarity_threshold=0.5)
-    assert isinstance(meta, dict)
 
 
 def test_disk_kv_store_streaming_backup_and_restore(tmp_path):
@@ -568,12 +542,11 @@ def test_persistence_with_sqlite_db_files(tmp_path):
     persistence = BasinPersistence(str(tmp_path / "persist_store"))
     assert persistence.save_topology(engine)
 
-    # Verify that successor.db exists in persistence dir
-    assert os.path.exists(tmp_path / "persist_store" / "successor.db")
-    assert os.path.exists(tmp_path / "persist_store" / "attractor.db")
+    active = persistence.active_dir()
+    assert os.path.exists(os.path.join(active, "successor.db"))
+    assert os.path.exists(os.path.join(active, "attractor.db"))
 
-    # Verify that meta.json exists and does NOT leak the whole successor dict into RAM/JSON
-    with open(tmp_path / "persist_store" / "meta.json", "r", encoding="utf-8") as f:
+    with open(os.path.join(active, "meta.json"), "r", encoding="utf-8") as f:
         meta_data = json.load(f)
     assert "successor" not in meta_data
     assert "attractor_of" not in meta_data

@@ -51,13 +51,20 @@ def _patch_torch_dtensor():
 class BasinIngestor:
     """Load TXT/MD/PDF, chunk, embed. IDs are content-addressed (source+index+text)."""
 
-    def __init__(self, model_name: str = "paraphrase-multilingual-MiniLM-L12-v2"):
+    def __init__(
+        self,
+        model_name: str = "paraphrase-multilingual-MiniLM-L12-v2",
+        chunk_size: int = 1000,
+        chunk_overlap: int = 100,
+    ):
         _patch_torch_dtensor()
         from sentence_transformers import SentenceTransformer
         self.encoder = SentenceTransformer(model_name)
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
         self.splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=100,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
             separators=["\n\n", "\n", ".", " ", ""],
         )
 

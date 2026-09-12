@@ -1,25 +1,12 @@
 import asyncio
 import re
 import json
-from typing import List, Optional
-from pydantic import BaseModel, Field
+from typing import Optional
 from ..core.topology import BasinTopologyEngine
 from ..core.llm import UniversalLLM
 from ..logging_config import setup_logging
 
 logger = setup_logging()
-
-
-class BasinSummarySchema(BaseModel):
-    title: str = Field(default="", description="Título curto e descritivo da bacia temática")
-    themes: List[str] = Field(default_factory=list, description="Lista de tópicos-chave")
-    entities: List[str] = Field(default_factory=list, description="Entidades nomeadas mencionadas")
-    summary: str = Field(default="", description="Resumo conciso de 2-3 frases")
-
-
-class BasinCritiqueSchema(BaseModel):
-    critique: str = Field(default="", description="Análise crítica sobre precisão e ausência de alucinações")
-    score: int = Field(default=5, ge=1, le=10, description="Nota de qualidade de 1 a 10")
 
 
 def extract_json_payload(raw_text: str) -> Optional[dict]:
@@ -159,31 +146,6 @@ class BasinSummarizer:
             draft = await self._refine(combined_texts, draft, critique)
             
         return draft.strip()
-    
-    async def summarize_all(self, concurrency: int = 3):
-        """Orquestra a sumarização de todas as bacias paralelamente."""
-        logger.info(f"🤖 Gerando Resumos L3 Agentic ({len(self.engine.basins)} bacias)...")
-        semaphore = asyncio.Semaphore(concurrency)
-        
-        async def _process(basin_id):
-            async with semaphore:
-                try:
-                    summary = await self.summarize_basin(basin_id)
-                    if basin_id in self.engine.basins:
-                        basin = self.engine.basins[basin_id]
-                        if basin.rho_tree.has_node(basin_id):
-                            basin.rho_tree.nodes[basin_id]['l3_summary'] = summary
-                            basin.rho_tree.nodes[basin_id]['l3_source'] = 'llm'
-                    # Extract just the title for printing
-                    title_match = re.search(r'TÍTULO:\s*(.*?)\n', summary, re.IGNORECASE)
-                    title = title_match.group(1)[:40] if title_match else "Sem Título"
-                    logger.info(f"  ✅ L3 {basin_id[:4]} concluído: {title}")
-                except Exception:
-                    logger.exception(f"  ⚠️ Falha no L3 da Bacia {basin_id[:4]}")
-        
-        tasks = [_process(bid) for bid in self.engine.basins]
-        await asyncio.gather(*tasks)
-        logger.info("✅ Todos os resumos L3 Agentic gerados e anexados ao grafo!")
 
     async def summarize_missing_background(self, persistence=None, interval: float = 2.0, verbose: bool = False):
         """

@@ -7,7 +7,7 @@
 [![Tests](https://img.shields.io/badge/tests-56%20passed-brightgreen.svg)](https://github.com/Basinfy/BasinRAG/actions)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![MTEB Score](https://img.shields.io/badge/MTEB-SOTA-brightgreen.svg)](https://huggingface.co/spaces/mteb/leaderboard)
+[![Gate](https://img.shields.io/badge/gate-CONVERT__C-blue.svg)](results/gate/decision.json)
 [![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.22664948-blue.svg)](https://doi.org/10.5281/zenodo.22664948)
 
 **High-Performance Topological Document Retrieval-Augmented Generation (RAG)**, using dynamical basins of attraction as an **index partitioning manifold**.
@@ -64,11 +64,11 @@ BasinRAG is built from the ground up to support multilingual and cross-lingual e
 
 - **Functional Graph Topology ($\phi$)**: Basin partitioning driven by sequential document flow and adaptive cosine similarity transitions.
 - **Semantic Virtual Edges**: Graph enrichment via semantic $k$-NN with threshold $> 0.85$.
-- **Hybrid RRF Fusion + Hop Prior**: Balanced fusion ($\alpha=0.55$) of sparse lexical and dense vector scores, decayed exponentially by topological graph distance $\exp(-\text{hops} \cdot \lambda)$.
-- **Multilingual Re-ranking**: Cross-Encoder mMARCO (`mmarco-mMiniLMv2-L12-H384-v1`).
+- **Hybrid RRF Fusion**: Sparse lexical BM25 plus dense FAISS. Basin hops are a briefing neighborhood, not a claimed nDCG lift.
+- **Multilingual Re-ranking**: Cross-Encoder (`BAAI/bge-reranker-v2-m3` by default).
 - **Intelligent Query Router**: Automatic PT/EN query categorization (`global` vs `hybrid`).
 - **Agentic L3 Summaries**: Multi-step *Draft → Critique → Refine* loop for satellite summaries.
-- **Transactional Atomic Persistence**: Power-outage-safe directory replacement (`safe_replace_dir`).
+- **Atomic Persistence**: Builds under `storage_dir/builds/<id>/` with an `os.replace` of `current.json`.
 - **Paginated Streaming DiskKVStore**: Out-of-core SQLite storage with cursor batching to eliminate Out-Of-Memory (OOM) spikes.
 - **FastAPI REST & WebSocket Server**: Rate-limited HTTP `/query` endpoint and streaming WebSocket `/chat`.
 
@@ -91,36 +91,16 @@ BasinRAG is built from the ground up to support multilingual and cross-lingual e
 
 BasinRAG has been rigorously evaluated on two gold-standard international benchmark suites: **Hugging Face MTEB / BEIR** (scientific retrieval) and **Princeton SWE-bench Lite** (fault localization across production repositories).
 
-### 1. Global Leaderboard Comparison on MTEB / BEIR (SciFact Dataset)
-Evaluated using the official `beir.retrieval.evaluation.EvaluateRetrieval` harness on the full 5,183-document corpus:
+### 1. Pre-registered gate (SciFact, 300 test queries)
+See [`results/gate/decision.json`](results/gate/decision.json). Topology is **not** claimed as an nDCG gain (`DECISION=CONVERT_C`). Basins are a briefing neighborhood around a hybrid BM25+FAISS index.
 
-| Model / System | Architecture Paradigm | nDCG@10 *(Official Score)* | Recall@10 | MRR@10 | Index Time | Latency / Query |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| 🚀 **BasinRAG (Ours)** | **Basin Topology ($\rho$-trees + RRF + Cross-Encoder)** | **0.771** | **85.8%** | **0.750** | **90.8s (CPU)** | **2.5s** |
-| **OpenAI `text-embedding-3-large`** | Commercial Dense Bi-Encoder (3,072d) | 0.725 | 84.1% | 0.702 | N/A (API) | ~0.2s |
-| **BGE-large-en-v1.5** | SOTA Open Bi-Encoder (BAAI - 335M) | 0.712 | 83.9% | 0.682 | Medium (GPU) | ~1.5s |
-| **HippoRAG** | Hippocampal Knowledge Graph + LLM Triplets | 0.710 | 83.0% | 0.680 | 1.5h (API) | ~4.2s |
-| **SPLADE v2** | Learned Sparse Neural (Naver Labs) | 0.692 | 82.8% | 0.665 | Medium (GPU) | ~1.8s |
-| **OpenAI `text-embedding-3-small`** | Commercial Dense Bi-Encoder (1,536d) | 0.690 | 82.0% | 0.665 | N/A (API) | ~0.2s |
-| **Contriever** | Contrastive Dense (Meta AI) | 0.677 | 81.5% | 0.650 | Low (GPU) | ~1.2s |
-| **ColBERT v1** | Late-Interaction Multi-Vector (Stanford) | 0.671 | 80.2% | 0.640 | High (VRAM) | ~2.0s |
-| **Standard BM25** | Statistical Sparse (Robertson et al.) | 0.665 | 78.8% | 0.620 | Minimal (CPU) | ~0.02s |
-| **OpenAI `text-embedding-ada-002`** | Commercial Dense Bi-Encoder (Legacy) | 0.642 | 77.0% | 0.610 | N/A (API) | ~0.2s |
-| **`all-MiniLM-L6-v2` (Pure)** | Dense Bi-Encoder Baseline (22M params) | 0.490 | 65.2% | 0.445 | Fast (CPU) | ~0.04s |
-| **GraphRAG Baseline** | Bipartite Entity Graph + Co-occurrence | 0.318 | 59.5% | 0.236 | 276.7s (CPU) | 11.1s |
+| System | nDCG@10 |
+| :--- | :---: |
+| Encoder only (`BAAI/bge-base-en-v1.5`) | **0.741** |
+| BasinRAG hybrid (BM25+FAISS, frozen harness) | **0.727** |
+| Previously published BasinRAG package | **0.650** |
 
-> **Key Takeaway**: Compared to the Knowledge Graph (GraphRAG) baseline, BasinRAG achieved a **+142.5% higher NDCG@10 and +217.8% higher MRR@10** on SciFact, while requiring **3.05x less indexing time** and reducing search latency by **4.43x**.
-
-### 2. Official Hugging Face MTEB Submission Package (300 Test Queries)
-Generated via `mteb` v2.20 harness with exhaustive evaluation up to $k \le 1000$:
-
-- **nDCG@10**: **0.650** (0.6497) *(+3.6% over initial baseline)*
-- **MRR@10**: **0.629** (0.6294) *(+9.1% over initial baseline)*
-- **MAP@10**: **0.619** (0.6188) *(+9.5% over initial baseline)*
-- **Hit@1 (First Rank Accuracy)**: **57.0%**
-- **Hit@5**: **71.3%** | **Hit@10**: **74.7%**
-- **Recall@100**: **87.0%**
-- **Recall@1000**: **98.7%** (near-complete search space coverage)
+> Encoder > hybrid > published. Do not treat the old 50-query BEIR slice as an official score. Reproduce with `python -m basinrag.eval.run_gate`.
 
 ### 3. Princeton SWE-bench Lite (Fault Localization on Real Repositories)
 Evaluated on real GitHub issues across production Python codebases (*Flask*, *Requests*, *Seaborn*, *Pytest*, *Pylint*, *Xarray*):

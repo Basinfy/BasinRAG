@@ -16,8 +16,11 @@ def main():
     subparsers = parser.add_subparsers(dest="command", help="Comandos disponíveis")
 
     # Ingest
-    ingest_parser = subparsers.add_parser("ingest", help="Ingerir documentos")
+    ingest_parser = subparsers.add_parser("ingest", help="Ingerir documentos (merge incremental)")
     ingest_parser.add_argument("path", type=str, help="Caminho do arquivo ou diretório")
+
+    reindex_parser = subparsers.add_parser("reindex", help="Reconstruir o indice do zero")
+    reindex_parser.add_argument("path", type=str, help="Caminho do arquivo ou diretório")
     
     # Query
     query_parser = subparsers.add_parser("query", help="Fazer uma busca topológica")
@@ -30,6 +33,7 @@ def main():
 
     # Serve
     serve_parser = subparsers.add_parser("serve", help="Iniciar servidor API")
+    serve_parser.add_argument("--host", type=str, default="127.0.0.1", help="Host do servidor")
     serve_parser.add_argument("--port", type=int, default=8000, help="Porta do servidor")
 
     args = parser.parse_args()
@@ -40,7 +44,13 @@ def main():
 
     if args.command == "serve":
         import uvicorn
-        uvicorn.run("basinrag.api.server:app", host="0.0.0.0", port=args.port, reload=False)
+        from basinrag.api.server import require_api_key_for_public_bind
+        try:
+            require_api_key_for_public_bind(args.host)
+        except RuntimeError as exc:
+            print(exc)
+            sys.exit(2)
+        uvicorn.run("basinrag.api.server:app", host=args.host, port=args.port, reload=False)
         return
 
     # Comandos que precisam do RAG carregado
@@ -54,7 +64,14 @@ def main():
             sys.exit(1)
         print(f"✅ Ingestão completa. {n} nós criados.")
 
-        
+    elif args.command == "reindex":
+        print(f"Reindexando a partir de {args.path}...")
+        n = rag.reindex(args.path)
+        if n == 0:
+            print(f"❌ Nenhum nó gerado a partir de {args.path}. Verifique o caminho e os arquivos.")
+            sys.exit(1)
+        print(f"✅ Reindexação completa. {n} nós criados.")
+
     elif args.command == "query":
         if not rag._loaded:
             print("Nenhum indice carregado. Rode: basinrag ingest <pasta>")

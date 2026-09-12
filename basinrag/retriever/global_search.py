@@ -22,22 +22,6 @@ class TopologicalGlobalSearch:
             self._l3_cache[key] = vec
         return self._l3_cache[key]
 
-    def search(
-        self,
-        query: str,
-        top_k_basins: int = 5,
-        max_nodes_per_basin: int = 3,
-        return_structured: bool = False,
-    ) -> List[Any]:
-        packet_parts = self.search_structured(query, top_k_basins, max_nodes_per_basin)
-        if return_structured:
-            return packet_parts
-        texts = []
-        for part in packet_parts:
-            texts.extend(part.get("hubs", []))
-            texts.extend(part.get("neighbors", []))
-        return texts
-
     def search_structured(
         self,
         query: str,

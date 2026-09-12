@@ -1,7 +1,9 @@
 name: BasinRAG CI
 
-# Manual trigger only — avoids burning GitHub Actions minutes on every push/PR
 on:
+  push:
+    branches: [main, master]
+  pull_request:
   workflow_dispatch:
     inputs:
       python-version:

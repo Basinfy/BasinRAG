@@ -76,18 +76,6 @@ class TopologicalLocalSearch:
             })
         return results
 
-    def search(
-        self,
-        query_embedding: np.ndarray,
-        top_k: int = 5,
-        max_tokens: int = 2000,
-        return_ids: bool = False,
-    ) -> List[Any]:
-        ranked = self.search_nodes(query_embedding, top_k=top_k, max_tokens=max_tokens)
-        if return_ids:
-            return ranked
-        return [r["text"] for r in ranked]
-
     def _neighbors_of_type(self, nid: str, edge_type: str) -> List[str]:
         if nid not in self.engine.graph:
             return []
@@ -102,7 +90,7 @@ class TopologicalLocalSearch:
         self,
         allowed_nodes: set[str],
         entrypoint_scores: Dict[str, float],
-        alpha: float = 0.85,
+        alpha: float = 0.50,
         max_iter: int = 15,
         tol: float = 1e-5,
     ) -> Dict[str, float]:
@@ -193,13 +181,25 @@ class TopologicalLocalSearch:
             seq_extra.update(self._neighbors_of_type(nid, "sequential"))
         allowed.update(seq_extra)
 
+        # Geodesic dynamic hops from query entrypoints
+        from collections import deque
+        dynamic_hops: Dict[str, int] = {ep: 0 for ep in entrypoints if ep in allowed}
+        q_bfs = deque((ep, 0) for ep in entrypoints if ep in allowed)
+        while q_bfs:
+            curr, d = q_bfs.popleft()
+            if curr in self.engine.graph:
+                for nbr in self.engine.graph.neighbors(curr):
+                    if nbr in allowed and nbr not in dynamic_hops:
+                        dynamic_hops[nbr] = d + 1
+                        q_bfs.append((nbr, d + 1))
+
         ppr_scores = self._compute_local_ppr(allowed, sim_map)
         scored = []
         for nid in allowed:
             if nid not in self.engine.graph:
                 continue
             data = self.engine.graph.nodes[nid]
-            hops = int(data.get("hops", 0))
+            hops = dynamic_hops.get(nid, int(data.get("hops", 0)))
             hop_w = 0.7 + 0.3 * math.exp(-hops * HOP_LAMBDA)
             ppr_val = ppr_scores.get(nid, 0.0)
             if nid in sim_map:

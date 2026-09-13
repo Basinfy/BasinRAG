@@ -88,7 +88,7 @@ def _validated_origins(value: str) -> set[str]:
     if not origins:
         raise ValueError("BASINRAG_CORS_ORIGINS deve conter ao menos uma origem")
     if "*" in origins:
-        raise ValueError("Wildcard não é permitido para origens de API/WebSocket v2")
+        raise ValueError("Wildcard não é permitido para origens de API/WebSocket")
     for origin in origins:
         parsed = urlsplit(origin)
         if (
@@ -226,7 +226,7 @@ class QueryResponse(BaseModel):
 
 def _get_rag() -> BasinRAG:
     if _rag_instance is None or not _rag_instance._loaded:
-        detail = _startup_error or "Nenhum snapshot v3 válido foi carregado"
+        detail = _startup_error or "Nenhum snapshot compatível foi carregado"
         raise HTTPException(status_code=503, detail=detail)
     return _rag_instance
 
@@ -249,7 +249,7 @@ async def lifespan(app: FastAPI):
         if _rag_instance._loaded:
             _rag_instance.validate_query_dependencies()
         else:
-            _startup_error = "Snapshot v3 não encontrado; execute basinrag reindex"
+            _startup_error = "Snapshot não encontrado; execute basinrag reindex"
     except Exception as exc:
         logger.exception("BasinRAG iniciado em estado não pronto")
         _startup_error = str(exc)
@@ -286,7 +286,7 @@ BasinRAGConfig.load_environment()
 API_KEY = os.environ.get("BASINRAG_API_KEY")
 ALLOWED_ORIGINS = _validated_origins(os.environ.get("BASINRAG_CORS_ORIGINS", _DEFAULT_ORIGINS))
 app = FastAPI(
-    title="BasinRAG API v2",
+    title="BasinRAG API",
     description="Hybrid retrieval API with structured references",
     lifespan=lifespan,
 )
@@ -313,18 +313,18 @@ async def verify_api_key(request: Request, authorization: str | None = Header(de
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
-@app.get("/v2/livez")
+@app.get("/livez")
 def livez():
     return {"status": "alive"}
 
 
-@app.get("/v2/readyz")
+@app.get("/readyz")
 def readyz():
     rag = _get_rag()
     return {"status": "ready", "build_id": rag.engine.build_id}
 
 
-@app.post("/v2/query", response_model=QueryResponse, dependencies=[Depends(verify_api_key)])
+@app.post("/query", response_model=QueryResponse, dependencies=[Depends(verify_api_key)])
 @limiter.limit("30/minute")
 async def query_endpoint(request: Request, body: QueryRequest):
     rag = _get_rag()
@@ -346,7 +346,7 @@ async def query_endpoint(request: Request, body: QueryRequest):
     return QueryResponse(request_id=uuid.uuid4().hex, results=results)
 
 
-@app.websocket("/v2/chat")
+@app.websocket("/chat")
 async def websocket_chat(websocket: WebSocket):
     global _ws_active_connections
     peer = websocket.client.host if websocket.client else "unknown"

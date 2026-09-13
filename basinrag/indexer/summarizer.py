@@ -49,7 +49,7 @@ class BasinSummarizer:
         provider: str = "ollama",
         model_name: str = "qwen2.5",
         *,
-        storage_dir: str = ".basinrag-v3",
+        storage_dir: str = ".basinrag",
         enabled: bool = False,
         allow_remote_egress: bool = False,
         model_revision: str = "unresolved",

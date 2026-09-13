@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Breaking changes
-- Identificador de pacote planejado: `1.1.0`. Apesar do número minor solicitado, esta preparação exige migração incompatível: lê somente snapshot v3 e altera a API. Reindexe fontes originais em um destino `.basinrag-v3` novo; mantenha o root antigo intacto para rollback.
+- Identificador de pacote planejado: `1.1.0`. Apesar do número minor solicitado, o formato interno do snapshot e a API foram alterados. Rotas públicas não usam prefixo de versão; o diretório padrão é `.basinrag`. Reindexe fontes originais em destino novo e vazio, mantendo o root antigo para rollback.
 - API moved to `/v2`; authentication uses `Authorization: Bearer`, and query output is structured.
 
 ### Security and persistence

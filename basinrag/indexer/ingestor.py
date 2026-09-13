@@ -13,7 +13,7 @@ from .condensation import node_layers
 
 _TEXT_EXTS = {".txt", ".md", ".markdown"}
 _PDF_EXTS = {".pdf"}
-_SKIP_DIRS = {".git", ".basinrag", ".basinrag-v3", "__pycache__", "node_modules", ".venv", "venv"}
+_SKIP_DIRS = {".git", ".basinrag", "__pycache__", "node_modules", ".venv", "venv"}
 
 
 def _legacy_chunk_length(text: str) -> int:

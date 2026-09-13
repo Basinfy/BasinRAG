@@ -66,7 +66,7 @@ def mock_rag():
             model_name="test-model", enable_background_l3=False,
             provider="local", allow_remote_l3_egress=False,
         )
-        rag.engine = SimpleNamespace(build_id="build-v3", graph=GraphStub())
+        rag.engine = SimpleNamespace(build_id="build-001", graph=GraphStub())
         rag.engine.close_stores = lambda: None
         rag.engine.graph.add_node(
             "node-1", source="/private/corpus/source.md", metadata={"page": 3}
@@ -110,14 +110,15 @@ def client(mock_rag, monkeypatch):
 
 
 def test_liveness_and_readiness_are_separate(client):
-    assert client.get("/v2/livez").json() == {"status": "alive"}
-    response = client.get("/v2/readyz")
+    assert client.get("/livez").json() == {"status": "alive"}
+    assert client.get("/v2/livez").status_code == 404
+    response = client.get("/readyz")
     assert response.status_code == 200
-    assert response.json() == {"status": "ready", "build_id": "build-v3"}
+    assert response.json() == {"status": "ready", "build_id": "build-001"}
 
 
 def test_query_returns_structured_source_without_absolute_path(client):
-    response = client.post("/v2/query", json={"query": "tema principal", "top_k": 2})
+    response = client.post("/query", json={"query": "tema principal", "top_k": 2})
     assert response.status_code == 200
     payload = response.json()
     assert payload["request_id"]
@@ -138,13 +139,13 @@ def test_query_returns_structured_source_without_absolute_path(client):
     {"query": "válida", "search_type": "hybrid_typo"},
 ])
 def test_query_rejects_invalid_contract(client, body):
-    assert client.post("/v2/query", json=body).status_code == 422
+    assert client.post("/query", json=body).status_code == 422
 
 
 def test_query_returns_503_without_loaded_snapshot(client, mock_rag):
     mock_rag._loaded = False
-    assert client.get("/v2/readyz").status_code == 503
-    assert client.post("/v2/query", json={"query": "pergunta válida"}).status_code == 503
+    assert client.get("/readyz").status_code == 503
+    assert client.post("/query", json={"query": "pergunta válida"}).status_code == 503
 
 
 def test_production_startup_requires_key(monkeypatch, mock_rag):
@@ -160,13 +161,13 @@ def test_bearer_is_the_only_http_credential(client, monkeypatch):
     monkeypatch.setenv("BASINRAG_API_KEY", "secret-token")
     with patch.object(server, "API_KEY", "secret-token"):
         url_credential = client.post(
-            "/v2/query?api_key=secret-token", json={"query": "pergunta válida"}
+            "/query?api_key=secret-token", json={"query": "pergunta válida"}
         )
         legacy_header = client.post(
-            "/v2/query", json={"query": "pergunta válida"}, headers={"X-API-Key": "secret-token"}
+            "/query", json={"query": "pergunta válida"}, headers={"X-API-Key": "secret-token"}
         )
         bearer = client.post(
-            "/v2/query", json={"query": "pergunta válida"},
+            "/query", json={"query": "pergunta válida"},
             headers={"Authorization": "Bearer secret-token"},
         )
     assert url_credential.status_code == 401
@@ -176,12 +177,12 @@ def test_bearer_is_the_only_http_credential(client, monkeypatch):
 
 def test_origin_allowlist_applies_to_http_and_websocket(client):
     denied = client.post(
-        "/v2/query", json={"query": "pergunta válida"}, headers={"Origin": "https://evil.example"}
+        "/query", json={"query": "pergunta válida"}, headers={"Origin": "https://evil.example"}
     )
     assert denied.status_code == 401
     with pytest.raises(WebSocketDisconnect) as exc:
         with client.websocket_connect(
-            "/v2/chat", headers={"Origin": "https://evil.example", "Authorization": "Bearer secret"}
+            "/chat", headers={"Origin": "https://evil.example", "Authorization": "Bearer secret"}
         ):
             pass
     assert exc.value.code == 1008
@@ -194,7 +195,7 @@ def test_proxy_ip_does_not_authenticate(monkeypatch):
 
 
 def test_websocket_emits_validated_json_events_and_citations(client):
-    with client.websocket_connect("/v2/chat") as websocket:
+    with client.websocket_connect("/chat") as websocket:
         websocket.send_json({"query": "tema principal", "top_k": 5})
         events = [websocket.receive_json() for _ in range(4)]
     assert [event["type"] for event in events] == ["start", "references", "token", "done"]
@@ -209,7 +210,7 @@ def test_websocket_citation_not_in_retrieved_refs_is_rejected(client, mock_rag):
         yield "Resposta [ref:inventada]"
 
     mock_rag.answer_stream = invalid_answer
-    with client.websocket_connect("/v2/chat") as websocket:
+    with client.websocket_connect("/chat") as websocket:
         websocket.send_json({"query": "tema principal"})
         events = [websocket.receive_json() for _ in range(3)]
     assert [event["type"] for event in events] == ["start", "references", "error"]
@@ -218,7 +219,7 @@ def test_websocket_citation_not_in_retrieved_refs_is_rejected(client, mock_rag):
 
 def test_websocket_rejects_oversized_payload(client, monkeypatch):
     monkeypatch.setattr(server, "WS_MAX_MESSAGE_BYTES", 4)
-    with client.websocket_connect("/v2/chat") as websocket:
+    with client.websocket_connect("/chat") as websocket:
         websocket.send_text("12345")
         with pytest.raises(WebSocketDisconnect) as exc:
             websocket.receive_json()
@@ -317,7 +318,7 @@ def test_websocket_rate_buckets_expire_and_enforce_limits(monkeypatch):
 
 def test_query_maps_missing_metadata_to_safe_defaults(client, mock_rag):
     mock_rag.aquery.return_value = [SimpleNamespace(page_content="sem metadados", metadata={})]
-    response = client.post("/v2/query", json={"query": "pergunta válida"})
+    response = client.post("/query", json={"query": "pergunta válida"})
     result = response.json()["results"][0]
     assert result["ref_id"] == "1"
     assert result["source_label"] is None
@@ -328,7 +329,7 @@ def test_query_maps_missing_metadata_to_safe_defaults(client, mock_rag):
 def test_websocket_rejects_missing_credentials_when_key_is_configured(client, monkeypatch):
     monkeypatch.setattr(server, "API_KEY", "secret")
     with pytest.raises(WebSocketDisconnect) as exc:
-        with client.websocket_connect("/v2/chat"):
+        with client.websocket_connect("/chat"):
             pass
     assert exc.value.code == 1008
 
@@ -336,14 +337,14 @@ def test_websocket_rejects_missing_credentials_when_key_is_configured(client, mo
 def test_websocket_rate_limit_and_connection_limit(client, monkeypatch):
     monkeypatch.setattr(server, "_ws_rate_allowed", lambda *_args: False)
     with pytest.raises(WebSocketDisconnect) as exc:
-        with client.websocket_connect("/v2/chat"):
+        with client.websocket_connect("/chat"):
             pass
     assert exc.value.code == 1008
 
     monkeypatch.setattr(server, "_ws_rate_allowed", lambda *_args: True)
     monkeypatch.setattr(server, "_ws_active_connections", server.WS_MAX_CONNECTIONS)
     with pytest.raises(WebSocketDisconnect) as exc:
-        with client.websocket_connect("/v2/chat"):
+        with client.websocket_connect("/chat"):
             pass
     assert exc.value.code == 1008
     monkeypatch.setattr(server, "_ws_active_connections", 0)
@@ -352,12 +353,12 @@ def test_websocket_rate_limit_and_connection_limit(client, monkeypatch):
 def test_websocket_not_ready_and_binary_frame_close(client, mock_rag, monkeypatch):
     monkeypatch.setattr(server, "_rag_instance", None)
     with pytest.raises(WebSocketDisconnect) as exc:
-        with client.websocket_connect("/v2/chat"):
+        with client.websocket_connect("/chat"):
             pass
     assert exc.value.code == 1013
 
     monkeypatch.setattr(server, "_rag_instance", mock_rag)
-    with client.websocket_connect("/v2/chat") as websocket:
+    with client.websocket_connect("/chat") as websocket:
         websocket.send_bytes(b"binary")
         with pytest.raises(WebSocketDisconnect) as exc:
             websocket.receive_json()
@@ -365,7 +366,7 @@ def test_websocket_not_ready_and_binary_frame_close(client, mock_rag, monkeypatc
 
 
 def test_websocket_malformed_message_can_be_followed_by_valid_request(client):
-    with client.websocket_connect("/v2/chat") as websocket:
+    with client.websocket_connect("/chat") as websocket:
         websocket.send_text("not-json")
         invalid = websocket.receive_json()
         websocket.send_json({"query": "pergunta válida"})
@@ -381,13 +382,13 @@ def test_websocket_reports_generation_timeout_and_failure(client, mock_rag, monk
         await asyncio.sleep(0.02)
 
     mock_rag.abrief = AsyncMock(side_effect=slow_brief)
-    with client.websocket_connect("/v2/chat") as websocket:
+    with client.websocket_connect("/chat") as websocket:
         websocket.send_json({"query": "pergunta válida"})
         events = [websocket.receive_json() for _ in range(2)]
     assert events[-1]["code"] == "timeout"
 
     mock_rag.abrief = AsyncMock(side_effect=RuntimeError("retrieval failed"))
-    with client.websocket_connect("/v2/chat") as websocket:
+    with client.websocket_connect("/chat") as websocket:
         websocket.send_json({"query": "pergunta válida"})
         events = [websocket.receive_json() for _ in range(2)]
     assert events[-1]["code"] == "generation_failed"
@@ -406,7 +407,7 @@ def test_websocket_cancels_generation_when_client_disconnects(client, mock_rag):
             raise
 
     mock_rag.abrief = AsyncMock(side_effect=wait_for_disconnect)
-    with client.websocket_connect("/v2/chat") as websocket:
+    with client.websocket_connect("/chat") as websocket:
         websocket.send_json({"query": "pergunta válida"})
         assert websocket.receive_json()["type"] == "start"
         assert generation_started.wait(timeout=2)
@@ -423,7 +424,7 @@ def test_websocket_rejects_oversized_queued_message_and_queue_overflow(
         return SimpleNamespace(node_ids=[], hubs=[], neighbors=[], satellites=[])
 
     mock_rag.abrief = AsyncMock(side_effect=slow_brief)
-    with client.websocket_connect("/v2/chat") as websocket:
+    with client.websocket_connect("/chat") as websocket:
         websocket.send_json({"query": "pergunta válida"})
         assert websocket.receive_json()["type"] == "start"
         websocket.send_text("x" * 101)
@@ -432,7 +433,7 @@ def test_websocket_rejects_oversized_queued_message_and_queue_overflow(
     assert exc.value.code == 1009
 
     monkeypatch.setattr(server, "WS_MAX_MESSAGE_BYTES", 8192)
-    with client.websocket_connect("/v2/chat") as websocket:
+    with client.websocket_connect("/chat") as websocket:
         websocket.send_json({"query": "pergunta válida"})
         assert websocket.receive_json()["type"] == "start"
         for _ in range(9):
@@ -452,8 +453,8 @@ def test_lifespan_records_unready_snapshot_and_closes_engine(monkeypatch):
         server.BasinRAG, "create", return_value=unready
     ):
         with TestClient(server.app):
-            assert server._startup_error == "Snapshot v3 não encontrado; execute basinrag reindex"
-            with pytest.raises(server.HTTPException, match="Snapshot v3"):
+            assert server._startup_error == "Snapshot não encontrado; execute basinrag reindex"
+            with pytest.raises(server.HTTPException, match="Snapshot não encontrado"):
                 server._get_rag()
     unready.engine.close_stores.assert_called_once()
 

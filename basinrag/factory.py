@@ -32,7 +32,7 @@ class BasinRAGConfig:
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
     reranker_revision: Optional[str] = None
     llm_revision: str = "unresolved"
-    storage_dir: str = ".basinrag-v3"
+    storage_dir: str = ".basinrag"
     search_type: SearchType = "auto"
     # Legacy splitter units are characters. Token-aware settings are additive.
     chunk_size: int = 512
@@ -265,8 +265,8 @@ class BasinRAG:
         if schema_version != 3 or not metadata or int(metadata.get("format_version", 0)) != 3:
             from .core.persistence import IndexRebuildRequired
             raise IndexRebuildRequired(
-                "O índice não usa o formato v3. Informe as fontes e execute "
-                "`basinrag reindex <origem> --storage-dir .basinrag-v3`."
+                "O índice usa um formato incompatível. Informe as fontes e execute "
+                "`basinrag reindex <origem> --storage-dir .basinrag`."
             )
 
         stored_encoder = metadata.get("encoder_model") or self.engine.encoder_model
@@ -280,7 +280,7 @@ class BasinRAG:
         if stored_revision not in (None, "unresolved") and actual_revision != stored_revision:
             raise ValueError(
                 "A revisão do encoder difere do manifesto do snapshot; execute reindex "
-                "em um destino v3 novo."
+                "em um destino novo."
             )
         tokenizer = getattr(getattr(self.ingestor, "splitter", None), "tokenizer", None)
         current_tokenizer = getattr(tokenizer, "name_or_path", None) or self.config.encoder_model
@@ -319,13 +319,13 @@ class BasinRAG:
         stored_stemming = bool(metadata.get("bm25_stemming", False))
         if stored_stemming != self.config.bm25_stemming:
             raise ValueError(
-                "A política de stemming BM25 mudou; execute reindex em um destino v3 novo."
+                "A política de stemming BM25 mudou; execute reindex em um destino novo."
             )
         expected_stemmer_version = current_stemmer_version(self.config.bm25_stemming)
         stored_stemmer_version = metadata.get("bm25_stemmer_version", "disabled")
         if stored_stemmer_version != expected_stemmer_version:
             raise ValueError(
-                "A versão do stemmer BM25 difere do manifesto; execute reindex em um destino v3 novo."
+                "A versão do stemmer BM25 difere do manifesto; execute reindex em um destino novo."
             )
 
     def _ensure_write_base(self) -> None:
@@ -344,7 +344,7 @@ class BasinRAG:
 
     def _inventory_sync_sources(self, root: str) -> dict[str, str]:
         supported = {".txt", ".md", ".markdown", ".pdf"}
-        skipped = {".git", ".basinrag", ".basinrag-v3", "__pycache__", "node_modules", ".venv", "venv"}
+        skipped = {".git", ".basinrag", "__pycache__", "node_modules", ".venv", "venv"}
         filepaths = []
         errors = []
 
@@ -864,7 +864,7 @@ class BasinRAG:
         yield from self._load_nodes(filepaths[0])
 
     def reindex(self, path: str) -> int:
-        """Build v3 into a new, empty destination; never mutate a legacy root."""
+        """Build a validated snapshot in a new, empty destination; never mutate a legacy root."""
         destination = os.path.abspath(self.config.storage_dir)
         if os.path.exists(destination) and os.listdir(destination):
             raise FileExistsError(

@@ -17,7 +17,7 @@ def isolate_implicit_engine_storage(monkeypatch, tmp_path, request):
 
     def isolated_init(self, *args, **kwargs):
         if kwargs.get("storage_dir") is None:
-            kwargs["storage_dir"] = str(tmp_path / "implicit-engine-v3")
+            kwargs["storage_dir"] = str(tmp_path / "implicit-engine")
         original_init(self, *args, **kwargs)
 
     monkeypatch.setattr(BasinTopologyEngine, "__init__", isolated_init)

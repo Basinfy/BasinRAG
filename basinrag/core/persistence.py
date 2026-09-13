@@ -77,7 +77,7 @@ class IndexRebuildRequired(RuntimeError):
 class BasinPersistence:
     """Split persistence: metadata JSON, embeddings NPZ, BM25 JSON, atomic current.json pointer."""
 
-    def __init__(self, storage_dir: str = ".basinrag-v3"):
+    def __init__(self, storage_dir: str = ".basinrag"):
         self.storage_dir = storage_dir
         self._write_lock = FileLock(
             os.path.join(self.storage_dir, "index.write.lock"),
@@ -450,7 +450,7 @@ class BasinPersistence:
         if meta.get("buildId") != os.path.basename(build_dir):
             raise ValueError("buildId do manifesto não corresponde à pasta do snapshot")
         if int(meta.get("index_schema_version", 0)) != 3:
-            raise IndexRebuildRequired("Snapshot incompatível; execute reindex para gerar formato v3")
+            raise IndexRebuildRequired("Snapshot incompatível; execute reindex para gerar o formato atual")
         BasinPersistence._validate_index_metadata(meta.get("index_metadata"))
         if int(meta.get("node_count", -1)) != len(saved_ids):
             raise ValueError("Contagem de nós do manifesto inválida")
@@ -568,15 +568,15 @@ class BasinPersistence:
                 with open(legacy_meta, "r", encoding="utf-8") as stream:
                     legacy = json.load(stream)
                 raise IndexRebuildRequired(
-                    f"Snapshot v{legacy.get('index_schema_version', 1)} é legado; "
-                    "execute reindex em um storage_dir v3 novo."
+                    f"O snapshot v{legacy.get('index_schema_version', 1)} é legado; "
+                    "execute reindex em um destino novo e vazio."
                 )
             if any(
                 os.path.isfile(os.path.join(self.storage_dir, name))
                 for name in ("graph.json", "embeddings.npy", "basin_data.json", "node_ids.json")
             ):
                 raise IndexRebuildRequired(
-                    "Índice sem ponteiro v3 detectado; execute reindex em um storage_dir novo."
+                    "Índice legado detectado; execute reindex em um destino novo e vazio."
                 )
             return False
 
@@ -590,7 +590,7 @@ class BasinPersistence:
         if schema_version != 3:
             raise IndexRebuildRequired(
                 f"Snapshot v{schema_version} não é aceito por esta release; "
-                "execute reindex em um storage_dir v3 novo."
+                "execute reindex em um destino novo e vazio."
             )
         active_id = self.current_build_id()
         if meta.get("buildId") != active_id or os.path.basename(root) != active_id:

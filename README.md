@@ -20,7 +20,7 @@ BasinRAG indexes PDF, Markdown, and TXT documents locally. Its default retrieval
 | Local hybrid retrieval | BM25 finds exact terms and IDs; FAISS finds semantic matches; RRF fuses their ranks. |
 | Briefing structure | Basin hubs and neighbors can add context around retrieved seeds. |
 | Local indexing | No LLM entity extraction or community-summary pass is required to build an index. |
-| Snapshot persistence | Immutable v3 generations are written under `.basinrag-v3/builds/` and published through `current.json`. |
+| Snapshot persistence | Immutable generations are written under `.basinrag/builds/` and published through `current.json`. |
 
 `experimental_topology` is an opt-in ranking mode. It is not the production default and should be evaluated by ablation on the same candidate set before use.
 
@@ -60,15 +60,15 @@ For development and evaluation, install `.[dev,api,eval]`. Ollama and OpenAI int
 ```python
 from basinrag import BasinRAG, BasinRAGConfig
 
-rag = BasinRAG(BasinRAGConfig(storage_dir=".basinrag-v3"))
+rag = BasinRAG(BasinRAGConfig(storage_dir=".basinrag"))
 rag.ingest("./my_documents")
 docs = rag.query("What is the core working principle?", top_k=5)
 ```
 
-Version 2 reads only v3 snapshots. Existing v1 indexes remain untouched; explicitly rebuild from original sources into a new, empty destination before switching over:
+The current reader requires the current snapshot format. Legacy indexes are left untouched; rebuild from original sources into a new, empty `.basinrag` directory before switching over:
 
 ```bash
-basinrag reindex ./my_documents --storage-dir ./.basinrag-v3
+basinrag reindex ./my_documents --storage-dir ./.basinrag
 ```
 
 `ingest` is additive and idempotent: new sources are added, unchanged sources are no-ops, and changed sources require `sync`. `sync` reflects changes and removals in the selected scope. A failed or racing read does not publish a partial snapshot.
@@ -89,7 +89,7 @@ To call the ASGI application directly, use `uvicorn basinrag.api.server:app`. Pu
 
 | Environment variable | Default | Description |
 |---|---|---|
-| `BASINRAG_STORAGE_DIR` | `.basinrag-v3` | New v3 index and build storage root. |
+| `BASINRAG_STORAGE_DIR` | `.basinrag` | Index and build storage root. |
 | `BASINRAG_ENCODER_MODEL` | `BAAI/bge-base-en-v1.5` | Dense encoder. Reindex after changing the encoder. |
 | `BASINRAG_RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | Optional cross-encoder model. |
 | `BASINRAG_LLM_PROVIDER` | `ollama` | `ollama` or `openai`; chat/L3 only. |

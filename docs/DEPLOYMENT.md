@@ -14,7 +14,7 @@ Para OpenAI, instale `.[api,openai]`. A avaliação e as ferramentas de desenvol
 
 ## Configuração
 
-O índice v3 fica em `BASINRAG_STORAGE_DIR` (padrão `.basinrag-v3`). Configure variáveis no ambiente do serviço ou use `.env` para desenvolvimento local. Precedência: **argumentos explícitos > ambiente do processo > `.env` > padrões**. Não armazene segredos de produção no repositório.
+O índice fica em `BASINRAG_STORAGE_DIR` (padrão `.basinrag`). Configure variáveis no ambiente do serviço ou use `.env` para desenvolvimento local. Precedência: **argumentos explícitos > ambiente do processo > `.env` > padrões**. Não armazene segredos de produção no repositório.
 
 Antes de expor a API, defina pelo menos:
 
@@ -45,7 +45,7 @@ basinrag ingest /srv/basinrag/documents
 basinrag sync /srv/basinrag/documents
 ```
 
-Use `basinrag reindex /srv/basinrag/documents --storage-dir /srv/basinrag/.basinrag-v3` para reconstruir o índice inteiro em destino novo/vazio. O leitor v2 não modifica índices antigos; mantenha o root anterior para rollback. Aponte `sync` para a raiz que define o escopo de sincronização e evite usá-lo com uma pasta temporária ou incompleta.
+Use `basinrag reindex /srv/basinrag/documents --storage-dir /srv/basinrag/.basinrag` para reconstruir o índice inteiro em destino novo/vazio. O leitor atual não modifica índices antigos; se `.basinrag` já contiver dados legados, escolha outro destino vazio e mantenha o root anterior para rollback. Aponte `sync` para a raiz que define o escopo de sincronização e evite usá-lo com uma pasta temporária ou incompleta.
 
 Cada gravação constrói uma geração em staging, valida os artefatos e publica `current.json` atomicamente. Um escritor por vez é permitido. Consultas existentes permanecem presas ao snapshot capturado enquanto a nova geração é publicada; mantenha o volume de armazenamento no mesmo host e faça backup/restaure o diretório inteiro como conjunto. A geração atual e a anterior são mantidas para recuperação.
 
@@ -69,10 +69,10 @@ Clientes precisam apresentar `Authorization: Bearer <key>` mesmo quando a aplica
 
 Rotas disponíveis:
 
-- `GET /v2/livez` — processo ativo.
-- `GET /v2/readyz` — snapshot e dependências válidos; retorna 503 enquanto indisponível.
-- `POST /v2/query` — `search_type` em `auto|local|global|hybrid`, `top_k` de 1 a 50; requer snapshot carregado.
-- `WS /v2/chat` — eventos JSON com referências validadas, erro e conclusão; origem validada e desconexão cancela geração.
+- `GET /livez` — processo ativo.
+- `GET /readyz` — snapshot e dependências válidos; retorna 503 enquanto indisponível.
+- `POST /query` — `search_type` em `auto|local|global|hybrid`, `top_k` de 1 a 50; requer snapshot carregado.
+- `WS /chat` — eventos JSON com referências validadas, erro e conclusão; origem validada e desconexão cancela geração.
 
 Mensagens WebSocket têm limite de 8 KiB; o processo limita conexões e gerações simultâneas e encerra geração após 120 segundos. Contadores são em memória e valem apenas para este processo. L3 está desligado por padrão; sumarização remota só recebe trechos com os dois opt-ins.
 
@@ -121,11 +121,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
 COPY pyproject.toml README.md LICENSE ./
 COPY basinrag ./basinrag
 RUN python -m pip install --no-cache-dir ".[api,${BASINRAG_PROVIDER_EXTRA}]"
-ENV BASINRAG_STORAGE_DIR=/data/.basinrag-v3
+ENV BASINRAG_STORAGE_DIR=/data/.basinrag
 EXPOSE 8000
 USER 10001:10001
 HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v2/livez', timeout=2)"
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/livez', timeout=2)"
 CMD ["basinrag", "serve", "--host", "0.0.0.0", "--port", "8000"]
 ```
 

@@ -9,7 +9,7 @@ from basinrag.indexer.bm25 import current_stemmer_version
 def _rag_with_index(*, configured_stemming: bool, stored_stemming: bool, stored_version: str):
     rag = BasinRAG.__new__(BasinRAG)
     rag.config = BasinRAGConfig(
-        storage_dir=".basinrag-v3-test",
+        storage_dir=".basinrag-test",
         encoder_model="unconfigured",
         use_rerank=False,
         bm25_stemming=configured_stemming,

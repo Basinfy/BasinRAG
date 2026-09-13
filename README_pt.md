@@ -27,7 +27,7 @@ As bacias definem a **vizinhança de contexto** para o briefing (hubs, vizinhos,
 | **Indexação sem LLM** | Sem extração de entidades / resumos de comunidade na ingestão |
 | **Híbrido lexical + denso** | BM25 em termos raros/IDs; dense em paráfrase |
 | **Briefing estruturado** | Hubs, vizinhos, L3 opcional para o gerador |
-| **Snapshot local imutável** | Builds v3 em `.basinrag-v3/builds/<id>/` |
+| **Snapshot local imutável** | Builds no diretório `.basinrag/builds/<id>/` |
 
 ---
 
@@ -73,7 +73,7 @@ python -m basinrag.eval.run_mteb --no-rerank --tasks SciFact,NFCorpus,FiQA2018,A
 - Bacias / PPR para expansão de **briefing** local  
 - Router `global` / `hybrid` / `local`  
 - L3 opcional em background  
-- Persistência atômica + FastAPI `/v2/query`, `/v2/chat` e WebSocket `/v2/ws`
+- Persistência atômica + FastAPI `/query` e WebSocket `/chat`
 
 ### Em relação a outros paradigmas
 
@@ -96,7 +96,7 @@ pip install -e ".[dev,api,ollama]"
 ```python
 from basinrag import BasinRAG, BasinRAGConfig
 
-rag = BasinRAG(BasinRAGConfig(storage_dir=".basinrag-v3"))
+rag = BasinRAG(BasinRAGConfig(storage_dir=".basinrag"))
 rag.ingest("./meus_documentos")
 docs = rag.query("Qual é o princípio central do modelo?", top_k=5)
 ```
@@ -109,10 +109,10 @@ basinrag chat
 basinrag serve --host 127.0.0.1 --port 8000
 ```
 
-Antes de usar a versão 2, reindexe explicitamente as fontes originais para um destino v3 novo/vazio. Índices da versão 1 permanecem intactos para rollback:
+Para migrar um índice legado, reindexe as fontes originais para um destino novo/vazio. O diretório padrão é `.basinrag`; mantenha o índice anterior intacto para rollback:
 
 ```bash
-basinrag reindex ./meus_documentos --storage-dir ./.basinrag-v3
+basinrag reindex ./meus_documentos --storage-dir ./.basinrag
 ```
 
 `ingest` é aditivo: fonte nova entra, inalterada é no-op e alterada exige `sync`. A publicação é atômica; falhas de leitura não publicam alterações parciais.
@@ -122,7 +122,7 @@ basinrag reindex ./meus_documentos --storage-dir ./.basinrag-v3
 | Variável | Padrão | Descrição |
 |---|---|---|
 | `BASINRAG_ENCODER_MODEL` | `BAAI/bge-base-en-v1.5` | Encoder denso |
-| `BASINRAG_STORAGE_DIR` | `.basinrag-v3` | Raiz do snapshot v3 |
+| `BASINRAG_STORAGE_DIR` | `.basinrag` | Diretório de armazenamento |
 | `BASINRAG_LLM_PROVIDER` | `ollama` | Chat / L3 |
 | `BASINRAG_LLM_MODEL` | `qwen2.5` | Modelo de chat |
 | `BASINRAG_RANKING_MODE` | `hybrid_rrf` | `experimental_topology` é opt-in |

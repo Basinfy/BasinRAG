@@ -13,11 +13,11 @@
 | [Teoria](THEORY.md) | φ, atratores, bacias, ρ | Pesquisadores |
 | [API](API_REFERENCE.md) | SDK, config, REST / WebSocket | Backend |
 | [Deploy](DEPLOYMENT.md) | Produção | DevOps |
-| [Release 1.1.0](RELEASE_1.1.0.md) | Migração v3, rollout e evidências de validação | Mantenedores |
+| [Release 1.1.0](RELEASE_1.1.0.md) | Migração, rollout e evidências de validação | Mantenedores |
 | [Multilíngue](MULTILINGUAL.md) | Stemmers / cross-lingual | IA |
 | [Exemplo de bacias](exemplo_bacias.md) | Walkthrough de topologia | Curiosos |
-| [Auditoria histórica v1.0.4](archive/AUDIT_REPORT_v1.0.4.md) | Checkout e protocolo anteriores; não descreve v2 | Mantenedores |
-| [Auditoria histórica v1.0.0](archive/AUDIT_REPORT_v1.0.0.md) | Registro de uma versão anterior; não descreve v2 | Mantenedores |
+| [Auditoria histórica v1.0.4](archive/AUDIT_REPORT_v1.0.4.md) | Checkout e protocolo anteriores; não descreve a release atual | Mantenedores |
+| [Auditoria histórica v1.0.0](archive/AUDIT_REPORT_v1.0.0.md) | Registro de uma versão anterior; não descreve a release atual | Mantenedores |
 
 ## Mapa de leitura
 

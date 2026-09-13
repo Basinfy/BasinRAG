@@ -2,27 +2,27 @@
 
 Este documento acompanha a preparação do BasinRAG 1.1.0. A versão ainda não deve ser tratada como publicada até a CI da branch passar e o piloto de reindexação ser aprovado. Resultados antigos permanecem históricos; esta release não aprova claims quantitativos de qualidade nem de superioridade topológica.
 
-> Atenção: `1.1.0` é o identificador solicitado para esta entrega, mas snapshots v3 e API `/v2` introduzem mudanças incompatíveis para consumidores 1.x. Planeje a migração como breaking change mesmo com o número minor.
+> Atenção: `1.1.0` é o identificador solicitado para esta entrega. O formato interno de snapshot mudou e rotas da API não têm prefixo de versão; consumidores 1.x ainda devem avaliar a migração como potencialmente incompatível.
 
 ## Mudanças de contrato
 
-- O leitor aceita snapshots v3. Índices legados não são atualizados automaticamente nem escritos durante a tentativa de abertura.
-- O diretório padrão é `.basinrag-v3`. Para rollback, mantenha o pacote e o root anteriores intactos.
-- `/v2/query`, `/v2/chat`, `/v2/livez` e `/v2/readyz` são os endpoints suportados. A API exige `Authorization: Bearer`; não envie credenciais na URL.
+- O leitor aceita o formato atual de snapshot. Índices legados não são atualizados automaticamente nem escritos durante a tentativa de abertura.
+- O diretório padrão é `.basinrag`. Para rollback, mantenha o pacote e o root anteriores intactos.
+- As rotas são `/query`, `/chat`, `/livez` e `/readyz`, sem prefixo de versão. A API exige `Authorization: Bearer`; não envie credenciais na URL.
 - `hybrid_rrf` é o ranking padrão. A expansão topológica é experimental. Sumarização L3 em background vem desligada; egress de trechos para um provedor remoto requer os dois opt-ins.
 - A versão de pacote é `1.1.0`; o número não altera a exigência de migração incompatível descrita acima.
 
 ## Migração segura
 
 1. Faça backup das fontes originais e mantenha o índice anterior sem alterações.
-2. Construa v3 em uma pasta nova/vazia, explicitando o destino:
+2. Construa um snapshot em uma pasta nova/vazia, explicitando o destino:
 
    ```bash
-   basinrag reindex /srv/basinrag/documents --storage-dir /srv/basinrag/.basinrag-v3
+   basinrag reindex /srv/basinrag/documents --storage-dir /srv/basinrag/.basinrag
    ```
 
-3. Valide queries representativas, citações, `/v2/readyz`, sincronização e restart usando apenas o novo root.
-4. Promova o serviço somente depois do piloto. Para rollback, volte ao pacote anterior e ao root anterior; não copie artefatos de v3 sobre o índice antigo.
+3. Valide queries representativas, citações, `/readyz`, sincronização e restart usando apenas o novo root.
+4. Promova o serviço somente depois do piloto. Para rollback, volte ao pacote anterior e ao root anterior; não copie artefatos novos sobre o índice antigo.
 
 `ingest` é aditivo: uma fonte alterada deve ser processada por `sync`. `sync` trata a raiz como escopo completo e remove fontes ausentes; não o execute contra uma pasta temporária ou incompleta. Consulte [Deploy](DEPLOYMENT.md) para configuração de serviço e segurança de rede.
 

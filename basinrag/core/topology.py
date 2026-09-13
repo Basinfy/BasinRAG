@@ -46,7 +46,7 @@ class BasinTopologyEngine:
         self.graph = nx.Graph()
         self.basins: Dict[str, TopologicalBasin] = {}
         
-        self.storage_dir = storage_dir or ".basinrag-v3"
+        self.storage_dir = storage_dir or ".basinrag"
         import os
         self._kv_dir = self.storage_dir
         self.successor: Any

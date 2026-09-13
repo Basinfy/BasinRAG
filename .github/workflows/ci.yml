@@ -27,7 +27,7 @@ jobs:
       - name: Package and public import smoke tests
         run: |
           uv run basinrag --help
-          uv run python -c "import basinrag; from basinrag import BasinRAG, BasinRAGConfig; assert basinrag.__version__ == '1.1.0'; assert BasinRAGConfig().storage_dir == '.basinrag-v3'; assert BasinRAG is not None"
+          uv run python -c "import basinrag; from basinrag import BasinRAG, BasinRAGConfig; assert basinrag.__version__ == '1.1.0'; assert BasinRAGConfig().storage_dir == '.basinrag'; assert BasinRAG is not None"
           uv run python -c "import basinrag.api.server; import langchain_ollama; import langchain_openai"
           uv run python -m build
       - name: Wheel and sdist clean-install smoke tests
@@ -35,11 +35,11 @@ jobs:
         run: |
           python -m venv /tmp/basinrag-wheel
           /tmp/basinrag-wheel/bin/python -m pip install 'dist/basinrag-1.1.0-py3-none-any.whl[api,ollama,openai]'
-          /tmp/basinrag-wheel/bin/python -c "from basinrag import BasinRAG, BasinRAGConfig; import basinrag.api.server, langchain_ollama, langchain_openai; assert BasinRAGConfig().storage_dir == '.basinrag-v3'"
+          /tmp/basinrag-wheel/bin/python -c "from basinrag import BasinRAG, BasinRAGConfig; import basinrag.api.server, langchain_ollama, langchain_openai; assert BasinRAGConfig().storage_dir == '.basinrag'"
           /tmp/basinrag-wheel/bin/basinrag --help
           python -m venv /tmp/basinrag-sdist
           /tmp/basinrag-sdist/bin/python -m pip install dist/basinrag-1.1.0.tar.gz[api,ollama,openai]
-          /tmp/basinrag-sdist/bin/python -c "from basinrag import BasinRAG, BasinRAGConfig; import basinrag.api.server; assert BasinRAGConfig().storage_dir == '.basinrag-v3'"
+          /tmp/basinrag-sdist/bin/python -c "from basinrag import BasinRAG, BasinRAGConfig; import basinrag.api.server; assert BasinRAGConfig().storage_dir == '.basinrag'"
           /tmp/basinrag-sdist/bin/basinrag --help
       - name: Docker context contract
         run: uv run python -m pytest tests/test_release_contracts.py -q

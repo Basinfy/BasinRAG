@@ -423,7 +423,7 @@ def test_directory_ingestion_skips_hidden_cache_and_venv_directories(tmp_path, m
     root = tmp_path / "corpus"
     root.mkdir()
     (root / "visible.txt").write_text("visible", encoding="utf-8")
-    for dirname in (".hidden", ".basinrag-v3", "venv"):
+    for dirname in (".hidden", ".basinrag", "venv"):
         skipped = root / dirname
         skipped.mkdir()
         (skipped / "hidden.txt").write_text("not ingested", encoding="utf-8")

@@ -21,7 +21,7 @@ BasinRAG combina BM25 e FAISS por RRF no modo padrão `hybrid_rrf`. Bacias e viz
 
 | Atributo | Tipo | Padrão | Descrição |
 |---|---|---|---|
-| `storage_dir` | `str` | `".basinrag-v3"` | Raiz dos snapshots v3. |
+| `storage_dir` | `str` | `".basinrag"` | Diretório de armazenamento dos snapshots. |
 | `provider` | `str` | `"ollama"` | Provedor de chat/L3 (`ollama` ou `openai`). |
 | `model_name` | `str` | `"qwen2.5"` | Modelo de chat e L3. |
 | `encoder_model` | `str` | `"BAAI/bge-base-en-v1.5"` | Encoder denso. Trocar o encoder exige `reindex`. |
@@ -65,18 +65,18 @@ Ordem de precedência: **argumentos explícitos > variáveis do processo > `.env
 
 ### Persistência
 
-O leitor aceita somente formato v3. Um índice antigo gera `IndexRebuildRequired` sem abrir SQLite para escrita nem alterar arquivos. Reindexe explicitamente para um destino novo/vazio, por padrão `.basinrag-v3`; não reutilize o root legado. Cada geração registra manifesto, revisões, proveniência e checksums, e só troca `current.json` depois das validações. Faça backup/restaure o root como conjunto coerente. A geração anterior fica disponível para rollback pela versão antiga.
+O formato do snapshot é versionado internamente para detectar índices incompatíveis sem escrita. Um índice antigo gera `IndexRebuildRequired` sem alterar arquivos. Reindexe as fontes originais para um destino novo/vazio, por padrão `.basinrag`; se esse diretório contiver um índice legado, escolha outro destino vazio e mantenha o root antigo para rollback. Cada geração registra manifesto, revisões, proveniência e checksums, e só troca `current.json` depois das validações. Faça backup/restaure o root como conjunto coerente.
 
 ## HTTP e WebSocket
 
 A aplicação FastAPI é `basinrag.api.server:app`. Inicie pela CLI com `basinrag serve --host 127.0.0.1 --port 8000` ou pelo ASGI com `uvicorn basinrag.api.server:app --host 127.0.0.1 --port 8000`.
 
 - **Autenticação:** somente `Authorization: Bearer <key>`; nunca use credencial em URL. WebSocket browser usa cookie same-origin autenticado, com Origin allowlisted. A chave é obrigatória no startup, salvo modo local explícito e loopback.
-- **`GET /v2/livez`** — processo ativo, sem depender do snapshot.
-- **`GET /v2/readyz`** — snapshot e dependências de consulta válidos; caso contrário 503.
-- **`POST /v2/query`** — corpo JSON com `query`, `search_type` (`auto|local|global|hybrid`) e `top_k` (1–50). Resultados incluem ref, texto, fonte, página, posição e papel, sem caminho absoluto. Sem snapshot válido, responde 503.
-- **`WS /v2/chat`** — mensagens JSON limitadas; eventos incluem request id, tokens, referências, erro e conclusão. Citações são validadas contra referências recuperadas; geração é cancelada ao desconectar.
+- **`GET /livez`** — processo ativo, sem depender do snapshot.
+- **`GET /readyz`** — snapshot e dependências de consulta válidos; caso contrário 503.
+- **`POST /query`** — corpo JSON com `query`, `search_type` (`auto|local|global|hybrid`) e `top_k` (1–50). Resultados incluem ref, texto, fonte, página, posição e papel, sem caminho absoluto. Sem snapshot válido, responde 503.
+- **`WS /chat`** — mensagens JSON limitadas; eventos incluem request id, tokens, referências, erro e conclusão. Citações são validadas contra referências recuperadas; geração é cancelada ao desconectar.
 - **Limites:** corpo WS 8 KiB, até 64 conexões, 8 gerações simultâneas e timeout de 120 s. Configure `BASINRAG_TRUSTED_PROXIES` somente para IP encaminhado; isso nunca autentica.
-- **CORS/Origin:** allowlist explícita; wildcard não é aceito para API v2. Origem WebSocket também é validada.
+- **CORS/Origin:** allowlist explícita; wildcard não é aceito. Origem WebSocket também é validada.
 
 Os limites de taxa são locais ao processo. A topologia suportada é um processo em um host; não aumente workers do ASGI sem uma implementação compartilhada de estado e uma estratégia de publicação compatível.

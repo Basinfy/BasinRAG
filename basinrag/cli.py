@@ -23,28 +23,28 @@ def main():
     # Ingest
     ingest_parser = subparsers.add_parser("ingest", help="Ingerir documentos (merge incremental)")
     ingest_parser.add_argument("path", type=str, help="Caminho do arquivo ou diretório")
-    ingest_parser.add_argument("--storage-dir", default=None, help="Destino do índice (padrão: .basinrag-v3)")
+    ingest_parser.add_argument("--storage-dir", default=None, help="Destino do índice (padrão: .basinrag)")
 
     reindex_parser = subparsers.add_parser("reindex", help="Reconstruir o indice do zero")
     reindex_parser.add_argument("path", type=str, help="Caminho do arquivo ou diretório")
-    reindex_parser.add_argument("--storage-dir", default=None, help="Destino novo/vazio do snapshot v3 (padrão: .basinrag-v3)")
+    reindex_parser.add_argument("--storage-dir", default=None, help="Destino novo/vazio do snapshot (padrão: .basinrag)")
 
     sync_parser = subparsers.add_parser(
         "sync", help="Sincronizar fontes: substituir arquivos alterados e remover os ausentes"
     )
     sync_parser.add_argument("path", type=str, help="Diretório ou arquivo a sincronizar")
-    sync_parser.add_argument("--storage-dir", default=None, help="Raiz do snapshot v3")
+    sync_parser.add_argument("--storage-dir", default=None, help="Raiz do índice")
     
     # Query
     query_parser = subparsers.add_parser("query", help="Fazer uma busca topológica")
     query_parser.add_argument("question", type=str, help="Sua pergunta")
     query_parser.add_argument("--type", type=str, default="auto", choices=["auto", "local", "global", "hybrid"], help="Tipo de busca")
     query_parser.add_argument("--top-k", dest="top_k", type=int, default=5, help="Numero de passagens")
-    query_parser.add_argument("--storage-dir", default=None, help="Raiz do snapshot v3")
+    query_parser.add_argument("--storage-dir", default=None, help="Raiz do índice")
 
     # Chat
     chat_parser = subparsers.add_parser("chat", help="Iniciar chat interativo")
-    chat_parser.add_argument("--storage-dir", default=None, help="Raiz do snapshot v3")
+    chat_parser.add_argument("--storage-dir", default=None, help="Raiz do índice")
     chat_parser.add_argument("--enable-background-l3", action="store_true", help="Ativar sumarização L3 em background")
     chat_parser.add_argument("--allow-remote-l3-egress", action="store_true", help="Permitir envio de trechos ao provedor LLM remoto para L3")
 
@@ -52,7 +52,7 @@ def main():
     serve_parser = subparsers.add_parser("serve", help="Iniciar servidor API")
     serve_parser.add_argument("--host", type=str, default="127.0.0.1", help="Host do servidor")
     serve_parser.add_argument("--port", type=int, default=8000, help="Porta do servidor")
-    serve_parser.add_argument("--storage-dir", default=None, help="Raiz do snapshot v3")
+    serve_parser.add_argument("--storage-dir", default=None, help="Raiz do índice")
     serve_parser.add_argument("--enable-background-l3", action="store_true", help="Ativar sumarização L3 em background")
     serve_parser.add_argument("--allow-remote-l3-egress", action="store_true", help="Permitir envio de trechos ao provedor LLM remoto para L3")
 

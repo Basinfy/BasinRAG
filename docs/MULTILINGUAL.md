@@ -10,12 +10,12 @@ BasinRAG does not claim universal or calibrated cross-lingual quality. Retrieval
 
 - Dense retrieval uses the configured encoder. The default BAAI/bge-base-en-v1.5 is English-oriented; multilingual use requires choosing and evaluating an appropriate model.
 - BM25 uses Unicode tokenization and a small set of language signals and stopwords. If language identification is uncertain, no stopwords are removed.
-- Stemming is disabled by default. It can be enabled with bm25_stemming=True or BASINRAG_BM25_STEMMING=true; the setting and stemmer package version are recorded in each v3 manifest. The optional `snowballstemmer` implementation requires no downloaded corpora.
+- Stemming is disabled by default. It can be enabled with bm25_stemming=True or BASINRAG_BM25_STEMMING=true; the setting and stemmer package version are recorded in the snapshot manifest. The optional `snowballstemmer` implementation requires no downloaded corpora.
 - hybrid_rrf is the default ranking mode. Experimental topological virtual links are opt-in and are not part of the default ranking path.
 - Basin summaries are for briefing and navigation, not evidence of improved retrieval. Background L3 is disabled by default; remote summarization requires both the L3 and remote-egress opt-ins.
 - Model revisions must be immutable commit SHAs. The default encoder and reranker are pinned in code; custom models require explicit revisions.
 
-For a custom encoder, configure both its model identifier and a full immutable commit SHA in encoder_revision. Changing the encoder, tokenizer, chunking policy, or stemming configuration requires a rebuild into a new v3 storage root. See the [API reference](API_REFERENCE.md) and [deployment guide](DEPLOYMENT.md) for the public interfaces and reindex workflow.
+For a custom encoder, configure both its model identifier and a full immutable commit SHA in encoder_revision. Changing the encoder, tokenizer, chunking policy, or stemming configuration requires a rebuild into a new, empty storage root. See the [API reference](API_REFERENCE.md) and [deployment guide](DEPLOYMENT.md) for the public interfaces and reindex workflow.
 
 <!-- Historical material retained for traceability; it is not part of the current contract.
 BasinRAG provides enterprise-grade out-of-the-box support for the **top 10 global software development and AI languages**:

@@ -161,7 +161,14 @@ class HybridSearch:
                             hops[nbr] = d + 1
                             q_bfs.append((nbr, d + 1))
 
-        scores = weighted_rrf(bm25_ids, fused_semantic_ids)
+        # BM25 may promote docs already in the dense (or expanded) pool.
+        # It must not insert lexical-only outsiders ahead of semantic seeds.
+        bm25_allowlist = list(dict.fromkeys(list(semantic_ids) + list(expanded_ids)))
+        scores = weighted_rrf(
+            bm25_ids,
+            fused_semantic_ids,
+            bm25_allowlist=bm25_allowlist,
+        )
         if use_hop_prior:
             scores = apply_hop_prior(scores, hops, enabled=True, missing=hop_missing)
 

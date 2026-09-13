@@ -446,6 +446,19 @@ def test_weighted_rrf_respects_rankings_and_depth():
     assert ranked_ids(scores, 0) == []
 
 
+def test_weighted_rrf_allowlist_drops_lexical_only_outsiders():
+    scores = weighted_rrf(
+        ["lexical_only", "both"],
+        ["semantic_only", "both"],
+        alpha=0.30,
+        k=60,
+        bm25_allowlist=["semantic_only", "both"],
+    )
+    assert "lexical_only" not in scores
+    assert scores["semantic_only"] > 0
+    assert scores["both"] > scores["semantic_only"]
+
+
 def test_hop_prior_enabled_disabled_penalty_and_empty_inputs():
     scores = {"near": 1.0, "far": 1.0, "unseen": 1.0}
     assert apply_hop_prior(scores, {}, enabled=False) == scores

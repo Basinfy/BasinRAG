@@ -150,13 +150,33 @@ class BasinRAGMTEBWrapper:
         self.rag.engine.build_graph(nodes)
         self.rag.engine.partition_into_basins()
         self.rag.engine.build_id = expected_build_id
+        from ..model_revisions import resolve_huggingface_revision
+
         splitter = getattr(self.rag.ingestor, "splitter", None)
         tokenizer = getattr(splitter, "tokenizer", None)
+        encoder_revision = resolve_huggingface_revision(
+            self.rag.config.encoder_model,
+            getattr(self.rag.config, "encoder_revision", None)
+            or getattr(self.rag.ingestor, "model_revision", None),
+        )
+        rerank_enabled = bool(self.use_rerank)
+        reranker_revision = (
+            resolve_huggingface_revision(
+                self.rag.config.reranker_model,
+                getattr(self.rag.config, "reranker_revision", None),
+            )
+            if rerank_enabled
+            else "disabled"
+        )
         self.rag.engine.index_metadata = {
-            "format_version": 2,
+            "format_version": 3,
             "encoder_model": self.rag.config.encoder_model,
+            "encoder_revision": encoder_revision,
             "tokenizer": getattr(tokenizer, "name_or_path", None)
             or self.rag.config.encoder_model,
+            "tokenizer_revision": encoder_revision,
+            "reranker_model": self.rag.config.reranker_model if rerank_enabled else None,
+            "reranker_revision": reranker_revision,
             **self.rag._chunk_policy_metadata(self.rag.config),
             "embedding_batch_size": self.rag.config.embedding_batch_size,
             "ranking_mode": self.rag.config.ranking_mode,
@@ -219,7 +239,9 @@ class BasinRAGMTEBWrapper:
         )
         results: Dict[str, Dict[str, float]] = {}
 
-        self.rag._ensure_retriever(search_type=self.search_type, top_k=top_k)
+        # MTEB retrieval asks for top_k=1000; production brief()/configure() cap at 50.
+        # Search uses search_nodes(pool_k) directly, so do not push the cutoff into configure().
+        self.rag._ensure_retriever(search_type=self.search_type)
         retriever = self.rag.retriever
         reranker = retriever._reranker
 

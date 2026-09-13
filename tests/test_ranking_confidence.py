@@ -195,3 +195,23 @@ def test_default_hybrid_candidate_order_is_invariant_to_graph_topology():
     assert [item["confidence"] for item in before] == pytest.approx(
         [item["confidence"] for item in after]
     )
+
+
+def test_hybrid_does_not_insert_lexical_only_outsiders():
+    class _BM25:
+        n = 2
+
+        def score(self, _query, top_k):
+            return [("lexical-only", 9.0), ("seed-a", 1.0)][:top_k]
+
+    class _DenseSearch:
+        def dense_hits(self, _query_embedding, top_k):
+            return [{"id": "seed-a", "score": 0.9}, {"id": "seed-b", "score": 0.8}][:top_k]
+
+    engine = _Engine()
+    engine.graph.add_node("lexical-only", text="rare token match")
+    engine.bm25 = _BM25()
+    hits = HybridSearch(engine, _DenseSearch()).search_nodes(
+        "question", np.array([1.0, 0.0]), top_k=2, use_confidence_gate=False
+    )
+    assert [item["id"] for item in hits] == ["seed-a", "seed-b"]

@@ -297,6 +297,69 @@ def test_mteb_main_writes_provenance_and_partial_summary_without_stale_scores(
     assert manifest["tasks"][1]["corpus"] == "mteb/nfcorpus"
 
 
+def test_mteb_wrapper_index_metadata_passes_v3_validation():
+    from basinrag.core.persistence import BasinPersistence
+    from tests.test_eval_runner_coverage import _FakeRag
+
+    rag = _FakeRag()
+    wrapper = BasinRAGMTEBWrapper(rag, force_reindex=True, cache_tag="SciFact|flat")
+    wrapper.index({"d1": {"title": "Title", "text": "Body"}})
+
+    BasinPersistence._validate_index_metadata(rag.engine.index_metadata)
+    assert rag.engine.index_metadata["format_version"] == 3
+    assert rag.engine.index_metadata["encoder_revision"] == "a" * 40
+    assert rag.engine.index_metadata["tokenizer_revision"] == "a" * 40
+    assert rag.engine.index_metadata["reranker_revision"] == "disabled"
+    assert rag.engine.index_metadata["reranker_model"] is None
+    assert rag.engine.index_metadata["gate_cache_tag"] == "SciFact|flat"
+
+
+def test_mteb_wrapper_index_metadata_records_reranker_when_enabled():
+    from basinrag.core.persistence import BasinPersistence
+    from tests.test_eval_runner_coverage import _FakeRag
+
+    rag = _FakeRag()
+    wrapper = BasinRAGMTEBWrapper(
+        rag, force_reindex=True, use_rerank=True, cache_tag="SciFact|ce"
+    )
+    wrapper.index({"d1": {"title": "Title", "text": "Body"}})
+
+    BasinPersistence._validate_index_metadata(rag.engine.index_metadata)
+    assert rag.engine.index_metadata["reranker_model"] == "fake/reranker"
+    assert rag.engine.index_metadata["reranker_revision"] == "b" * 40
+
+
+def test_mteb_wrapper_search_accepts_mteb_topk_without_configuring_retriever():
+    import numpy as np
+
+    calls = {}
+    ranked = [{"id": "n1", "text": "one", "score": 0.9, "metadata": {"doc_id": "d1"}}]
+
+    class Retriever:
+        _reranker = SimpleNamespace(_model="disabled")
+        _hybrid = SimpleNamespace(search_nodes=lambda *args, **kwargs: ranked)
+
+        @staticmethod
+        def _encode_query(query):
+            return np.ones(2)
+
+    rag = SimpleNamespace(retriever=Retriever())
+
+    def ensure(*, search_type=None, top_k=None):
+        calls["search_type"] = search_type
+        calls["top_k"] = top_k
+        if top_k is not None and not 1 <= int(top_k) <= 50:
+            raise ValueError("top_k must be between 1 and 50")
+
+    rag._ensure_retriever = ensure
+    wrapper = BasinRAGMTEBWrapper(rag, use_rerank=False)
+    scores = wrapper.search({"q": "claim"}, top_k=1000)
+
+    assert scores["q"]["d1"] == 0.9
+    assert calls["search_type"] == "hybrid"
+    assert calls["top_k"] is None
+
+
 def test_mteb_wrapper_ranking_defaults_to_topology_free_rrf():
     wrapper = BasinRAGMTEBWrapper(SimpleNamespace())
 

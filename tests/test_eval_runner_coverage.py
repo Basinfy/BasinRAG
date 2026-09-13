@@ -386,6 +386,10 @@ def test_mteb_wrapper_indexes_dict_cache_and_limits():
     assert rag.engine.gate_cache_tag == "tag"
     assert wrapper._is_flat_index is True
     assert rag.persistence.save_calls == 1
+    from basinrag.core.persistence import BasinPersistence
+    BasinPersistence._validate_index_metadata(rag.engine.index_metadata)
+    assert rag.engine.index_metadata["format_version"] == 3
+    assert rag.engine.index_metadata["reranker_revision"] == "disabled"
 
     limited = BasinRAGMTEBWrapper(_FakeRag(), force_reindex=True, max_corpus_docs=1)
     with pytest.raises(SkipLargeCorpus, match="2 docs"):

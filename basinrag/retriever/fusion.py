@@ -1,10 +1,11 @@
-"""Weighted RRF (α=0.55, k=60) fused on node ids, with optional experimental signals."""
+"""Weighted RRF (α=0.15, k=60) fused on node ids, with optional experimental signals."""
 from __future__ import annotations
 
 import math
 from typing import Dict, List, Optional, Sequence
 
-HYBRID_ALPHA = 0.55
+# Dense-led fusion: BM25 is a light lexical vote inside the dense pool.
+HYBRID_ALPHA = 0.15
 RRF_K = 60
 HOP_LAMBDA = 0.35
 # Prefer neutral for production recall: unreachable lexical hits keep seed-tier weight.
@@ -29,10 +30,18 @@ def weighted_rrf(
     alpha: float = HYBRID_ALPHA,
     k: int = RRF_K,
     max_depth: int = 500,
+    bm25_allowlist: Optional[Sequence[str]] = None,
 ) -> Dict[str, float]:
-    """Standard Reciprocal Rank Fusion between BM25 and semantic rankings."""
+    """Reciprocal Rank Fusion between BM25 and semantic rankings.
+
+    When ``bm25_allowlist`` is set, BM25 votes only for those ids. Lexical-only
+    outsiders cannot enter the fused ranking; they were the SciFact drop vs dense.
+    """
+    allowed = None if bm25_allowlist is None else set(bm25_allowlist)
     scores: Dict[str, float] = {}
     for rank, nid in enumerate(bm25_ids[:max_depth]):
+        if allowed is not None and nid not in allowed:
+            continue
         scores[nid] = scores.get(nid, 0.0) + alpha / (k + rank + 1)
     for rank, nid in enumerate(semantic_ids[:max_depth]):
         scores[nid] = scores.get(nid, 0.0) + (1.0 - alpha) / (k + rank + 1)

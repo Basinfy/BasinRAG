@@ -81,7 +81,7 @@ def audit_query_stages(
     dense = local.dense_hits(emb, top_k=ck)
     dense_ids = [h["id"] for h in dense]
 
-    rrf_scores = weighted_rrf(bm25_ids, dense_ids)
+    rrf_scores = weighted_rrf(bm25_ids, dense_ids, bm25_allowlist=dense_ids)
     rrf_order = ranked_ids(rrf_scores, ck)
 
     # Same hop BFS as HybridSearch (candidates only)

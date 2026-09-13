@@ -465,6 +465,22 @@ def test_run_mteb_metadata_and_source_error_branches(monkeypatch):
     assert run_mteb._source_revision() == {"commit": None, "dirty": None, "revision": "unknown"}
 
 
+def test_source_revision_ignores_untracked_files(monkeypatch):
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(list(args))
+        result = SimpleNamespace(stdout="abc123\n" if "rev-parse" in args else "")
+        return result
+
+    monkeypatch.setattr(run_mteb.subprocess, "run", fake_run)
+    revision = run_mteb._source_revision()
+    assert revision["commit"] == "abc123"
+    assert revision["dirty"] is False
+    assert revision["revision"] == "abc123"
+    assert calls[1][1:4] == ["status", "--porcelain", "--untracked-files=no"]
+
+
 def test_swebench_record_workspace_and_dataset_helpers(monkeypatch, tmp_path):
     record = {
         "instance_id": "org__repo-1",

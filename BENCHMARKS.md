@@ -4,7 +4,17 @@
 
 Os resultados em `results/gate/`, `results/mteb*/` e `results/qasper*/` são artefatos históricos. Parte deles antecede o código e as alterações locais em avaliação; a decisão gravada em `results/gate/decision.json` não valida esta revisão. Também não publique a média dos arquivos MTEB existentes como se todos tivessem sido produzidos pela mesma execução.
 
-Até uma nova execução limpa ser concluída, **não há pontuação atual de release declarada neste documento**. Os números históricos podem ser consultados nos artefatos originais, mas não são uma linha de base reproduzida da revisão atual.
+Até a arena de cinco tarefas e o gate SciFact+QASPER desta revisão concluírem no mesmo commit, **não há pontuação atual de release declarada neste documento**. Os números históricos podem ser consultados nos artefatos originais, mas não são uma linha de base reproduzida da revisão atual.
+
+### Medição pontual (não é release)
+
+SciFact MTEB, split test, 300 queries, `hybrid_rrf`, sem rerank, encoder `BAAI/bge-base-en-v1.5` (`dd9f4294…`), dataset `d56462d0…`:
+
+| Commit | Artefato | nDCG@10 | Recall@10 | MRR@10 |
+|---|---|---|---|---|
+| `c1da17e` | `results/runs/mteb-20260913-173459` | 0.74389 | 0.87589 | 0.70717 |
+
+Isso mede só SciFact. Não publique este número como média BEIR nem como score de release.
 
 ## Protocolo reproduzível
 

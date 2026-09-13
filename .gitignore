@@ -43,6 +43,10 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# Local graphify cache and non-source assets
+graphify-out/
+basinrag_linkedin_cover.jpg
+
 # Evaluation artifacts
 logs/
 results/runs/

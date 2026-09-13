@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Retrieval and evaluation
 - Keep `hybrid_rrf` as default; topology remains experimental. Gate decisions require complete, provenance-compatible SciFact and QASPER runs; partial MTEB runs do not publish official means.
 - Existing benchmark artifacts and papers are historical records, not current release claims. This changelog does not approve quantitative claims.
+- Dense-led RRF: BM25 votes only inside the dense/expanded pool; `HYBRID_ALPHA` 0.55 → 0.15. The MTEB wrapper writes snapshot metadata v3 and does not pass MTEB `top_k=1000` into `configure()`.
+- SciFact MTEB on `c1da17e` (`results/runs/mteb-20260913-173459`, no rerank, `BAAI/bge-base-en-v1.5`): nDCG@10 0.74389. Single-task measurement only; not a five-task or twelve-task release mean.
 
 ## [1.0.4] - 2026-09-09
 

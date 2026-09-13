@@ -70,7 +70,7 @@ def _source_revision() -> Dict[str, Any]:
             timeout=5,
         ).stdout.strip()
         status = subprocess.run(
-            ["git", "status", "--porcelain"],
+            ["git", "status", "--porcelain", "--untracked-files=no"],
             cwd=repo_root,
             check=True,
             capture_output=True,

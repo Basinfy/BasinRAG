@@ -1,0 +1,18 @@
+{
+  "kpi": "QASPER evidence/passage recall (non-saturated)",
+  "n_papers": 120,
+  "n_queries": 120,
+  "chunk_size": 512,
+  "chunk_overlap": 128,
+  "expand_on": {
+    "hit@10": 0.7416666666666667,
+    "evidence_recall@10": 0.4277777777777778,
+    "n_queries": 120
+  },
+  "expand_off": {
+    "hit@10": 0.7333333333333333,
+    "evidence_recall@10": 0.4222222222222222,
+    "n_queries": 120
+  },
+  "expand_delta_evidence_recall@10": 0.005555555555555591
+}

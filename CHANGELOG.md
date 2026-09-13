@@ -8,7 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Docs
-- README / README_pt, `BENCHMARKS.md`, arquitetura e índice descrevem o produto: híbrido BM25+FAISS; bacias como mapa de briefing; números SciFact / BEIR atuais.
+- Protocolo primário de ranking: BEIR-EN-small (SciFact, NFCorpus, FiQA2018, ArguAna, SCIDOCS), média nDCG@10 **0.445**, MTEB `--no-rerank`.
+- Long-doc: evidence/passage n=120, expand Δ +0.006; SWE-bench deixa de ser claim de leaderboard.
+
+### Eval
+- `qasper_evidence --storage-dir` para não misturar índices; protocolo SWE-bench oficial isolado em `swebench_protocol.py`.
 
 ### CONVERT_C
 - Gate (`results/gate/decision.json`): bacias como briefing; ranking híbrido no SciFact.

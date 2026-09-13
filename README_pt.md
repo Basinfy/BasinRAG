@@ -59,19 +59,18 @@ graph TD
 
 ## Benchmarks (resumo)
 
-Retrieval híbrido no SciFact (300 queries, sem CE):
+Protocolo primário de ranking: BEIR-EN-small via MTEB (`--no-rerank`, `bge-base-en-v1.5`). Não é o score overall `MTEB(eng, v2)`.
 
-| Métrica | Valor |
-| :--- | :---: |
-| nDCG@10 | **0.734** |
-| Recall@10 | **0.869** |
+| Suite | Métrica | Valor |
+| :--- | :--- | :---: |
+| BEIR-EN-small (5 tarefas) | média nDCG@10 | **0.445** |
+| SciFact (MTEB) | nDCG@10 / Recall@10 | **0.733** / **0.866** |
+| Long-doc evidence (n=120) | evidence_recall@10 | 0.428 (expand Δ +0.006) |
 
-Protocolo e long-doc: [`BENCHMARKS.md`](BENCHMARKS.md).  
-SWE-bench (localização em código) entra na documentação quando a bateria for refeita.
+Tabelas e comandos: [`BENCHMARKS.md`](BENCHMARKS.md). SWE-bench `% Resolved` é board de agente, não score do BasinRAG.
 
 ```powershell
-python -m basinrag.eval.run_gate --skip-rerank
-python -m basinrag.eval.run_mteb --no-rerank --tasks SciFact
+python -m basinrag.eval.run_mteb --no-rerank --tasks SciFact,NFCorpus,FiQA2018,ArguAna,SCIDOCS --output results/mteb_beir_arena
 ```
 
 ---

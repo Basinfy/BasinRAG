@@ -19,36 +19,53 @@ Relatório de recall: [`results/recall_report.md`](results/recall_report.md).
 
 ---
 
-## SciFact (híbrido)
+## Ranking primário — BEIR-EN-small (MTEB, sem CE)
 
-Protocolo do gate: prompt BGE, sem cross-encoder no path flat.
+Protocolo congelado: split `test`, encoder `bge-base-en-v1.5` + prompt BGE, RRF BM25+FAISS, **sem rerank**, hop off em corpus flat. Métrica: **nDCG@10**. Não é o score overall `MTEB(eng, v2)`.
 
-| Métrica | Gate `hybrid_min` | MTEB `--no-rerank` |
-| :--- | :---: | :---: |
-| nDCG@10 | **0.734** | **0.733** |
-| Recall@10 | **0.869** | **0.866** |
-| Hit@10 | 0.883 | 0.880 |
+| Tarefa | nDCG@10 | Recall@10 | Artefacto |
+| :--- | :---: | :---: | :--- |
+| SciFact | 0.733 | 0.866 | `results/mteb_beir_arena/` |
+| NFCorpus | 0.370 | 0.178 | idem |
+| FiQA2018 | 0.343 | 0.423 | idem |
+| ArguAna | 0.589 | 0.846 | idem |
+| SCIDOCS | 0.192 | 0.198 | idem |
+| **Média (5/5)** | **0.445** | | |
 
-Artefatos: `results/gate/`, `results/mteb_recall_eval/`.
+Gate SciFact `hybrid_min`: nDCG@10 0.734 / Recall@10 0.869 (dense puro 0.740 — o híbrido não ganha do encoder neste corpus).
+
+```powershell
+python -m basinrag.eval.run_mteb --no-rerank --tasks SciFact,NFCorpus,FiQA2018,ArguAna,SCIDOCS --output results/mteb_beir_arena
+```
 
 ---
 
-## Long-doc
+## Long-doc (evidence / passage)
 
-Para expansão de grafo / chunking, use **evidence / passage recall**:
+QASPER no HuggingFace falha (script dataset). Fallback: `ccdv/arxiv-summarization`, query = abstract, ouro = excertos do corpo.
+
+Escala 120 papers / 120 queries (`results/qasper_evidence_scale/report.json`):
+
+| Config | Hit@10 | evidence_recall@10 |
+| :--- | :---: | :---: |
+| expand ON | 0.742 | 0.428 |
+| expand OFF | 0.733 | 0.422 |
+| Δ | +0.008 | **+0.006** |
+
+Smoke n=40: Δ evidence = +0.008. Expand ajuda pouco; KPI não satura (ao contrário do paper-id Recall@10 = 1.0).
 
 ```powershell
-python -m basinrag.eval.qasper_evidence --max-papers 40 --max-queries 80 --ablate-expand
+python -m basinrag.eval.qasper_evidence --max-papers 120 --max-queries 200 --ablate-expand --output results/qasper_evidence_scale --storage-dir .basinrag/qasper_evidence_scale
 ```
 
 ---
 
 ## SWE-bench
 
-Localização de arquivo em issues de código (Hit@k) — bateria a reexecutar e publicar aqui quando estiver estável:
+Não é o board global (`% Resolved` + Docker). Sonda de localização, só no Lite **300** com Avg/Any/All Recall. `--limit 13` e n=21 (astropy+django) não se publicam como score.
 
 ```powershell
-python -m basinrag.eval.swebench --limit 13
+python -m basinrag.eval.swebench
 ```
 
 ---
@@ -71,6 +88,6 @@ python -m basinrag.eval.swebench --limit 13
 
 ```powershell
 python -m basinrag.eval.run_gate --skip-rerank
-python -m basinrag.eval.run_mteb --no-rerank --tasks SciFact
-python -m basinrag.eval.qasper_evidence --max-papers 40 --max-queries 80 --ablate-expand
+python -m basinrag.eval.run_mteb --no-rerank --tasks SciFact,NFCorpus,FiQA2018,ArguAna,SCIDOCS --output results/mteb_beir_arena
+python -m basinrag.eval.qasper_evidence --max-papers 120 --max-queries 200 --ablate-expand --output results/qasper_evidence_scale --storage-dir .basinrag/qasper_evidence_scale
 ```

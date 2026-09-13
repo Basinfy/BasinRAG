@@ -248,6 +248,11 @@ def evaluate_passage_recall(
     }
 
 
+def _resolve_storage(storage_dir: Optional[str]) -> Path:
+    path = Path(storage_dir) if storage_dir else _repo_root() / ".basinrag" / "qasper_evidence"
+    return path if path.is_absolute() else _repo_root() / path
+
+
 def main():
     parser = argparse.ArgumentParser(description="QASPER passage-level evidence recall KPI")
     parser.add_argument("--output", type=str, default="results/qasper_evidence")
@@ -258,6 +263,12 @@ def main():
     parser.add_argument("--chunk-overlap", type=int, default=128)
     parser.add_argument("--top-k", type=int, default=10)
     parser.add_argument("--ablate-expand", action="store_true", help="Also run expand_graph=False")
+    parser.add_argument(
+        "--storage-dir",
+        type=str,
+        default=None,
+        help="Index directory (default: .basinrag/qasper_evidence)",
+    )
     args = parser.parse_args()
 
     out_dir = Path(args.output)
@@ -270,7 +281,7 @@ def main():
     print(f"[qasper_evidence] papers={len(corpus)} queries={len(queries)}", flush=True)
 
     config = BasinRAGConfig(
-        storage_dir=str(_repo_root() / ".basinrag" / "qasper_evidence"),
+        storage_dir=str(_resolve_storage(args.storage_dir)),
         encoder_model=args.encoder,
         chunk_size=args.chunk_size,
         chunk_overlap=args.chunk_overlap,

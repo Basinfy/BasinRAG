@@ -29,12 +29,14 @@ BasinRAG é um **RAG híbrido local (BM25 + FAISS)** com grafo funcional e **bac
 
 \*Embeddings locais ou API — distinto de extração de entidades.
 
-### SciFact (híbrido BasinRAG)
+### Ranking (híbrido BasinRAG, MTEB `--no-rerank`)
 
-| Métrica | Valor |
+| Suite | nDCG@10 |
 | :--- | :---: |
-| nDCG@10 | **0.734** |
-| Recall@10 | **0.869** |
+| BEIR-EN-small (média 5 tarefas) | **0.445** |
+| SciFact | **0.733** |
+
+SciFact gate `hybrid_min` = 0.734; dense puro = 0.740 neste corpus. Números em [`BENCHMARKS.md`](../BENCHMARKS.md).
 
 ---
 
@@ -47,7 +49,7 @@ Em corpora flat (1 documento = 1 nó), o path de ranking é o híbrido.
 
 ## 4. SWE-bench
 
-Eixo natural de vantagem do produto (estrutura de código / bacias modulares). Números serão publicados em [`BENCHMARKS.md`](../BENCHMARKS.md) após a bateria ser refeita.
+Não entra no claim global. O board mede **% Resolved** (patch + Docker). BasinRAG é retriever; localização de ficheiros (Lite 300) é sonda de domínio, não leaderboard.
 
 ---
 

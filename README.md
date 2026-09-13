@@ -59,19 +59,18 @@ graph TD
 
 ## Benchmarks (summary)
 
-Hybrid retrieval on SciFact (300 queries, no CE):
+Primary ranking protocol: BEIR-EN-small via MTEB (`--no-rerank`, `bge-base-en-v1.5`). Not the overall `MTEB(eng, v2)` score.
 
-| Metric | Value |
-| :--- | :---: |
-| nDCG@10 | **0.734** |
-| Recall@10 | **0.869** |
+| Suite | Metric | Value |
+| :--- | :--- | :---: |
+| BEIR-EN-small (5 tasks) | mean nDCG@10 | **0.445** |
+| SciFact (MTEB) | nDCG@10 / Recall@10 | **0.733** / **0.866** |
+| Long-doc evidence (n=120) | evidence_recall@10 | 0.428 (expand Δ +0.006) |
 
-Protocol and long-doc KPIs: [`BENCHMARKS.md`](BENCHMARKS.md).  
-SWE-bench (code file localization) will be documented when the suite is re-run.
+Full tables and commands: [`BENCHMARKS.md`](BENCHMARKS.md). SWE-bench `% Resolved` is an agent board, not a BasinRAG score.
 
 ```powershell
-python -m basinrag.eval.run_gate --skip-rerank
-python -m basinrag.eval.run_mteb --no-rerank --tasks SciFact
+python -m basinrag.eval.run_mteb --no-rerank --tasks SciFact,NFCorpus,FiQA2018,ArguAna,SCIDOCS --output results/mteb_beir_arena
 ```
 
 ---

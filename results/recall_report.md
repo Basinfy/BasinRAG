@@ -72,7 +72,7 @@ KPI não saturado (ao contrário do paper-id). Expand ajuda pouco nesta amostra.
 1. **Pipeline, não topologia**, fechou o gap do pacote publicado.
 2. Manter **CE off em flat** no path MTEB/publicação.
 3. Não tunar SciFact; leakage topo permanece sinal de arestas kNN.
-4. Próximo investimento: evidence/passage maior + SWE-bench Hit@k.
+4. Feito: evidence/passage n=120 (Δ expand +0.006) e BEIR-EN-small média nDCG@10 0.445. SWE-bench não é o claim global.
 
 ## Comandos reproduzidos
 

@@ -9,7 +9,7 @@ Visão geral: [README](../README_pt.md) · Números: [`BENCHMARKS.md`](../BENCHM
 |------|-----------|---------|
 | [Quickstart](QUICKSTART.md) | Instalar, ingest, query, chat | Desenvolvedores |
 | [README](../README_pt.md) | Visão do produto | Todos |
-| [Benchmarks](../BENCHMARKS.md) | SciFact, long-doc, SWE-bench | ML / pesquisa |
+| [Benchmarks](../BENCHMARKS.md) | BEIR-EN-small, evidence/passage, SWE-bench (sonda) | ML / pesquisa |
 | [Comparativo de paradigmas](BENCHMARK_COMPARISON_pt.md) | Dense / GraphRAG-class / BasinRAG | Arquitetos |
 | [Arquitetura](../ARCHITECTURE.md) | Pipelines de ingestão e retrieval | Engenheiros |
 | [Teoria](THEORY.md) | φ, atratores, bacias, ρ | Pesquisadores |

@@ -1,0 +1,56 @@
+{
+  "protocol": {
+    "encoder": "BAAI/bge-base-en-v1.5",
+    "rerank": false,
+    "search_type": "hybrid",
+    "max_corpus_docs": 200000,
+    "query_prompt": "Represent this sentence for searching relevant passages: "
+  },
+  "run_log": [
+    {
+      "task": "SCIDOCS",
+      "status": "ok"
+    }
+  ],
+  "scores": {
+    "ArguAna": {
+      "ndcg@10": 0.58925,
+      "recall@10": 0.84566,
+      "mrr@10": 0.508307,
+      "main_score": 0.58925,
+      "path": "C:\\Users\\Alex Martins\\Documents\\BasinRAG\\results\\mteb_beir_arena\\results\\Basinfy__BasinRAG\\1.0.4\\ArguAna.json"
+    },
+    "FiQA2018": {
+      "ndcg@10": 0.34273,
+      "recall@10": 0.42277,
+      "mrr@10": 0.417144,
+      "main_score": 0.34273,
+      "path": "C:\\Users\\Alex Martins\\Documents\\BasinRAG\\results\\mteb_beir_arena\\results\\Basinfy__BasinRAG\\1.0.4\\FiQA2018.json"
+    },
+    "NFCorpus": {
+      "ndcg@10": 0.3701,
+      "recall@10": 0.17834,
+      "mrr@10": 0.582008,
+      "main_score": 0.3701,
+      "path": "C:\\Users\\Alex Martins\\Documents\\BasinRAG\\results\\mteb_beir_arena\\results\\Basinfy__BasinRAG\\1.0.4\\NFCorpus.json"
+    },
+    "SCIDOCS": {
+      "ndcg@10": 0.19168,
+      "recall@10": 0.19798,
+      "mrr@10": 0.335134,
+      "main_score": 0.19168,
+      "path": "C:\\Users\\Alex Martins\\Documents\\BasinRAG\\results\\mteb_beir_arena\\results\\Basinfy__BasinRAG\\1.0.4\\SCIDOCS.json"
+    },
+    "SciFact": {
+      "ndcg@10": 0.7333,
+      "recall@10": 0.86611,
+      "mrr@10": 0.699275,
+      "main_score": 0.7333,
+      "path": "C:\\Users\\Alex Martins\\Documents\\BasinRAG\\results\\mteb_beir_arena\\results\\Basinfy__BasinRAG\\1.0.4\\SciFact.json"
+    }
+  },
+  "n_completed": 1,
+  "n_skipped_large": 0,
+  "n_errors": 0,
+  "mean_ndcg@10": 0.44541200000000003
+}

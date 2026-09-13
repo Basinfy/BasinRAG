@@ -1,5 +1,6 @@
 # Runtime index (never commit embeddings / graph dumps / SQLite DBs)
 .basinrag/
+.basinrag-v3/
 .basinrag.tmp-*/
 *.npz
 *.db
@@ -11,6 +12,10 @@
 .env.local
 *.pem
 *.key
+.agents/
+.claude/
+.windsurf/
+.mcp.json
 
 # Python
 __pycache__/
@@ -40,6 +45,14 @@ Thumbs.db
 
 # Evaluation artifacts
 logs/
+results/runs/
+results/optimization_runs/
+results/swebench/
+results/failure_audit_*/
+results/gate*/
+results/mteb*/
+results/qasper*/
+results/*_report.*
 gold.*.json
 results/mteb/remote/
 results/mteb_fase*/

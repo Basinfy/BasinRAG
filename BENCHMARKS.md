@@ -1,93 +1,58 @@
-# BasinRAG — Benchmarks
+# Protocolo de benchmarks do BasinRAG
 
-**Gate:** [`results/gate/decision.json`](results/gate/decision.json) (`DECISION=CONVERT_C`)  
-**Encoder:** `BAAI/bge-base-en-v1.5`  
-**Ranking:** híbrido BM25 + FAISS  
-**Bacias:** mapa de briefing (vizinhança de contexto)
+## Estado das evidências
 
-Relatório de recall: [`results/recall_report.md`](results/recall_report.md).
+Os resultados em `results/gate/`, `results/mteb*/` e `results/qasper*/` são artefatos históricos. Parte deles antecede o código e as alterações locais em avaliação; a decisão gravada em `results/gate/decision.json` não valida esta revisão. Também não publique a média dos arquivos MTEB existentes como se todos tivessem sido produzidos pela mesma execução.
 
----
+Até uma nova execução limpa ser concluída, **não há pontuação atual de release declarada neste documento**. Os números históricos podem ser consultados nos artefatos originais, mas não são uma linha de base reproduzida da revisão atual.
 
-## Papel de cada componente
+## Protocolo reproduzível
 
-| Componente | Função |
-| :--- | :--- |
-| Híbrido BM25 + FAISS | Ranking em corpora de documentos |
-| Bacias / hop / expansão local | Vizinhança e briefing para o LLM |
-| Indexação sem LLM | Ingestão local sem extração de entidades |
+Execute cada avaliação com um diretório de saída novo e exclusivo. Não reutilize nem mescle diretórios de runs anteriores. Grave a revisão do código, versão de Python e dependências, encoder/tokenizer, corpus e split, parâmetros, tarefas solicitadas e concluídas, e o hardware usado. Um score agregado só representa uma bateria completa se todas as tarefas esperadas concluírem com sucesso nesta mesma execução.
 
----
-
-## Ranking primário — BEIR-EN-small (MTEB, sem CE)
-
-Protocolo congelado: split `test`, encoder `bge-base-en-v1.5` + prompt BGE, RRF BM25+FAISS, **sem rerank**, hop off em corpus flat. Métrica: **nDCG@10**. Não é o score overall `MTEB(eng, v2)`.
-
-| Tarefa | nDCG@10 | Recall@10 | Artefacto |
-| :--- | :---: | :---: | :--- |
-| SciFact | 0.733 | 0.866 | `results/mteb_beir_arena/` |
-| NFCorpus | 0.370 | 0.178 | idem |
-| FiQA2018 | 0.343 | 0.423 | idem |
-| ArguAna | 0.589 | 0.846 | idem |
-| SCIDOCS | 0.192 | 0.198 | idem |
-| **Média (5/5)** | **0.445** | | |
-
-Gate SciFact `hybrid_min`: nDCG@10 0.734 / Recall@10 0.869 (dense puro 0.740 — o híbrido não ganha do encoder neste corpus).
+No PowerShell:
 
 ```powershell
-python -m basinrag.eval.run_mteb --no-rerank --tasks SciFact,NFCorpus,FiQA2018,ArguAna,SCIDOCS --output results/mteb_beir_arena
+$run = "results/runs/gate-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+python -m basinrag.eval.run_gate --output $run --skip-rerank
+
+$run = "results/runs/mteb-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+python -m basinrag.eval.run_mteb `
+  --no-rerank `
+  --tasks SciFact,NFCorpus,FiQA2018,ArguAna,SCIDOCS `
+  --output $run
 ```
 
----
+O relatório MTEB deve apontar somente os artefatos das tarefas concluídas na execução registrada e usar caminhos relativos ao diretório do run. Se qualquer tarefa falhar ou for pulada, mostre o status parcial e não apresente a média como resultado completo de cinco tarefas. Para evitar mistura, use outro diretório se precisar repetir uma execução.
 
-## Long-doc (evidence / passage)
+## Métricas de retrieval
 
-QASPER no HuggingFace falha (script dataset). Fallback: `ccdv/arxiv-summarization`, query = abstract, ouro = excertos do corpo.
+Compare encoder denso, BM25, RRF e modo topológico separadamente, usando o mesmo corpus, split, consultas, candidatos e parâmetros de avaliação. Registre `nDCG@10`, `Recall@10`, `MRR@10`, ordem dos IDs recuperados, latência p50/p95, tempo de ingestão, pico de memória e espaço em disco. Fixe a semente e os embeddings dos testes sintéticos; não use `hash()` do Python para gerar dados determinísticos.
 
-Escala 120 papers / 120 queries (`results/qasper_evidence_scale/report.json`):
+O modo `hybrid_rrf` é a referência de produção. O `experimental_topology` só deve ser considerado após ablação; o controle sem topologia precisa ser invariável às bacias, hops e arestas virtuais. Em validações fixas, os limites de comparação definidos pelo projeto são: não aceitar regressão superior a `0.005` em nDCG@10 nem `0.01` em Recall@10. Sem um SLA explícito, só chamar uma alteração de otimização de desempenho se ela melhorar pelo menos 10% uma métrica medida sem ultrapassar esses limites de qualidade.
 
-| Config | Hit@10 | evidence_recall@10 |
-| :--- | :---: | :---: |
-| expand ON | 0.742 | 0.428 |
-| expand OFF | 0.733 | 0.422 |
-| Δ | +0.008 | **+0.006** |
-
-Smoke n=40: Δ evidence = +0.008. Expand ajuda pouco; KPI não satura (ao contrário do paper-id Recall@10 = 1.0).
-
-```powershell
-python -m basinrag.eval.qasper_evidence --max-papers 120 --max-queries 200 --ablate-expand --output results/qasper_evidence_scale --storage-dir .basinrag/qasper_evidence_scale
-```
-
----
+`confidence` não é uma probabilidade calibrada. Para avaliar abstenção, use um conjunto de validação independente e reporte calibração, falsos aceites e falsas abstenções; não interprete o score de ordenação como confiança calibrada.
 
 ## SWE-bench
 
-Não é o board global (`% Resolved` + Docker). Sonda de localização, só no Lite **300** com Avg/Any/All Recall. `--limit 13` e n=21 (astropy+django) não se publicam como score.
+O benchmark padrão do BasinRAG mede localização/recuperação de arquivos — por exemplo, Recall@k, Any Recall e All Recall. Checkpoints devem corresponder ao mesmo split, protocolo e subconjunto de instâncias; resultados de subconjuntos diferentes não podem ser combinados. Caminhos oficiais são comparados após normalizar separadores e `./`, sem correspondência fuzzy.
 
-```powershell
-python -m basinrag.eval.swebench
-```
+Essa recuperação **não é `% Resolved`**. O indicador oficial só pode ser publicado quando patches reais forem avaliados pelo harness Docker oficial, no conjunto e protocolo correspondentes. JSONL de predições de localização sem patch não é evidência de resolução.
 
----
+## Defaults e configuração registrados
 
-## Defaults de produção
+- Encoder padrão: `BAAI/bge-base-en-v1.5` com o prefixo BGE de consulta.
+- Ranking padrão: BM25 + FAISS com RRF; `experimental_topology` é opt-in.
+- Chunk legado: `chunk_size=512` e `chunk_overlap=128`, em caracteres. Opções de tokens são aditivas e devem ser registradas quando usadas.
+- Reranking: documente se habilitado. A arena MTEB reproduzível acima desliga reranking com `--no-rerank`.
+- Índice, tokenizer, tamanho/overlap de chunks e batch de embeddings: inclua os valores efetivos no protocolo do run.
 
-| Knob | Valor |
-| :--- | :--- |
-| Encoder | `BAAI/bge-base-en-v1.5` + query prompt BGE |
-| `candidate_k` | `max(50, top_k*5)` |
-| Índice vetorial | FlatIP se N ≤ 20 000; senão HNSW `efSearch=256` |
-| CE em índice flat (path MTEB) | off por padrão |
-| Hop `missing` | `neutral` (produção); `penalty` no gate |
-| Chunk | 512 / overlap 128 |
-| Reranker (quando ligado) | `BAAI/bge-reranker-v2-m3`, `max_length=512` |
+Não altere limiares de Flat/HNSW ou pesos de ranking com base em um único run. Para avaliar ANN, compare Recall@k contra busca Flat em uma amostra fixa e informe latência, memória e configuração do índice.
 
----
+## Fontes dos dados
 
-## Reprodução
+- Gate SciFact/long-document: `basinrag.eval.run_gate`.
+- Tarefas padronizadas MTEB: `basinrag.eval.run_mteb`.
+- Avaliação de localização SWE-bench: `basinrag.eval.swebench`.
 
-```powershell
-python -m basinrag.eval.run_gate --skip-rerank
-python -m basinrag.eval.run_mteb --no-rerank --tasks SciFact,NFCorpus,FiQA2018,ArguAna,SCIDOCS --output results/mteb_beir_arena
-python -m basinrag.eval.qasper_evidence --max-papers 120 --max-queries 200 --ablate-expand --output results/qasper_evidence_scale --storage-dir .basinrag/qasper_evidence_scale
-```
+Os resultados dependem das versões dos datasets, dependências, modelos e parâmetros. Preserve o manifesto e os arquivos brutos de cada execução junto do relatório.

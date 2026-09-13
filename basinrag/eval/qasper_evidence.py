@@ -207,7 +207,7 @@ def evaluate_passage_recall(
     top_k: int = 10,
     expand_graph: bool = True,
 ) -> Dict[str, float]:
-    hits = 0
+    hits = 0.0
     recall_sum = 0.0
     n = 0
     for i, (qid, qtext) in enumerate(queries.items(), 1):

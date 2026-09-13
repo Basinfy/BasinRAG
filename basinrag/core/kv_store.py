@@ -2,6 +2,7 @@ import os
 import sqlite3
 import json
 import threading
+from pathlib import Path
 from typing import Any, Iterator, Dict, List, Tuple
 
 class DiskKVStore:
@@ -9,12 +10,34 @@ class DiskKVStore:
     A thread-safe persistent Key-Value store backed by SQLite with WAL mode.
     Used to replace in-memory dicts for out-of-core graph scaling (OOM prevention).
     """
-    def __init__(self, db_path: str, table_name: str = "kvstore"):
+    def __init__(self, db_path: str, table_name: str = "kvstore", *, read_only: bool = False):
         self.db_path = db_path
         self.table_name = "".join(c for c in table_name if c.isalnum() or c == "_")
         self._lock = threading.RLock()
-        self.conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30.0)
-        self._create_table()
+        self.read_only = read_only
+        if read_only:
+            if not os.path.isfile(self.db_path):
+                raise FileNotFoundError(self.db_path)
+            self.conn = sqlite3.connect(
+                f"{Path(self.db_path).resolve().as_uri()}?mode=ro&immutable=1",
+                uri=True,
+                check_same_thread=False,
+                timeout=30.0,
+            )
+            row = self.conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (self.table_name,),
+            ).fetchone()
+            if row is None:
+                self.conn.close()
+                raise ValueError(f"SQLite store missing table {self.table_name!r}")
+        else:
+            self.conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30.0)
+            self._create_table()
+
+    def _require_writable(self) -> None:
+        if self.read_only:
+            raise RuntimeError("Snapshot stores are read-only; build a new generation to write")
 
     def _create_table(self):
         with self._lock:
@@ -30,6 +53,7 @@ class DiskKVStore:
                 )
 
     def set(self, key: str, value: Any) -> None:
+        self._require_writable()
         val_str = json.dumps(value, ensure_ascii=False)
         with self._lock:
             with self.conn:
@@ -40,6 +64,7 @@ class DiskKVStore:
 
     def set_many(self, mapping: Dict[str, Any]) -> None:
         """High-throughput atomic batch insert using a single transaction."""
+        self._require_writable()
         if not mapping:
             return
         items = [(k, json.dumps(v, ensure_ascii=False)) for k, v in mapping.items()]
@@ -62,6 +87,7 @@ class DiskKVStore:
             return default
 
     def pop(self, key: str, default: Any = None) -> Any:
+        self._require_writable()
         with self._lock:
             cursor = self.conn.execute(
                 f'SELECT value FROM "{self.table_name}" WHERE key = ?',
@@ -151,10 +177,12 @@ class DiskKVStore:
 
     def vacuum(self) -> None:
         """Compacta o banco SQLite."""
+        self._require_writable()
         with self._lock:
             self.conn.execute("VACUUM")
 
     def clear(self) -> None:
+        self._require_writable()
         with self._lock:
             with self.conn:
                 self.conn.execute(f'DELETE FROM "{self.table_name}"')
@@ -188,10 +216,12 @@ class DiskKVStore:
             return json.loads(row[0])
 
     def __setitem__(self, key: str, value: Any) -> None:
+        self._require_writable()
         self.set(key, value)
 
     def backup_to(self, dest_path: str) -> None:
         """Create an atomic, streaming SQLite backup to dest_path without in-memory deserialization."""
+        self._require_writable()
         dest_abs = os.path.abspath(dest_path)
         src_abs = os.path.abspath(self.db_path)
         if dest_abs == src_abs:
@@ -210,6 +240,7 @@ class DiskKVStore:
 
     def restore_from(self, src_path: str) -> None:
         """Restore database contents from another SQLite database file using streaming backup."""
+        self._require_writable()
         if not os.path.exists(src_path):
             return
         src_abs = os.path.abspath(src_path)

@@ -6,31 +6,23 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Gate](https://img.shields.io/badge/gate-CONVERT__C-blue.svg)](results/gate/decision.json)
-[![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.22664948-blue.svg)](https://doi.org/10.5281/zenodo.22664948)
 
-**Hybrid BM25 + FAISS RAG** with document basins as a structured **briefing map** for the LLM.
+**Basinfy’s local hybrid retrieval system:** BM25 + FAISS, with document basins used as a structured briefing map for an LLM.
 
 </div>
 
-## What BasinRAG is
+## What BasinRAG does
 
-BasinRAG is a **local hybrid retrieval stack** for PDF / Markdown / TXT:
-
-1. **Sparse:** bilingual CSR BM25  
-2. **Dense:** FAISS over `BAAI/bge-base-en-v1.5` (default)  
-3. **Structure:** sequential functional graph $\phi$, attractors, and $\rho$-trees → **basins**
-
-Basins define a **context neighborhood** for briefing (hubs, neighbors, optional L3). Ranking on flat corpora is driven by the hybrid BM25 + FAISS path. Gate decision: [`results/gate/decision.json`](results/gate/decision.json) (`CONVERT_C`).
+BasinRAG indexes PDF, Markdown, and TXT documents locally. Its default retrieval ranking fuses sparse BM25 and dense FAISS results with reciprocal rank fusion (RRF). A functional graph groups related chunks into basins that can expand the context sent to a generator; topology does not change the default seed ranking.
 
 | Capability | Role |
 | :--- | :--- |
-| **$0 LLM indexing** | No entity extraction or community summaries at ingest |
-| **Hybrid lexical + dense** | BM25 for rare terms / IDs; dense for paraphrase |
-| **Structured briefing** | Hubs, neighbors, optional L3 for the generator |
-| **Local deterministic index** | Builds under `.basinrag/builds/<id>/` |
+| Local hybrid retrieval | BM25 finds exact terms and IDs; FAISS finds semantic matches; RRF fuses their ranks. |
+| Briefing structure | Basin hubs and neighbors can add context around retrieved seeds. |
+| Local indexing | No LLM entity extraction or community-summary pass is required to build an index. |
+| Snapshot persistence | Immutable v3 generations are written under `.basinrag-v3/builds/` and published through `current.json`. |
 
----
+`experimental_topology` is an opt-in ranking mode. It is not the production default and should be evaluated by ablation on the same candidate set before use.
 
 ## Architecture
 
@@ -38,111 +30,118 @@ Basins define a **context neighborhood** for briefing (hubs, neighbors, optional
 graph TD
     subgraph Ingest
         A[PDF / MD / TXT] --> B[Chunk + embed]
-        B --> C[Sequential graph φ]
+        B --> C[Functional graph]
         C --> D[FAISS]
         C --> E[BM25]
-        C --> F[Basins ρ — briefing map]
+        C --> F[Basins — briefing map]
     end
     subgraph Query
-        Q[Query] --> R[Router: global / hybrid / local]
-        R --> S1[BM25]
-        R --> S2[FAISS]
-        S1 --> T[RRF ± hop prior]
-        S2 --> T
-        T --> U[Optional cross-encoder]
-        U --> V[BriefingPacket → LLM]
-        F -. neighborhood .-> V
+        Q[Query] --> R[BM25 + FAISS]
+        R --> S[RRF — default ranking]
+        S --> T[Optional reranker]
+        T --> U[Retrieved seeds]
+        U --> V[Optional basin context expansion]
+        V --> W[BriefingPacket → LLM]
     end
 ```
 
----
+## Install
 
-## Benchmarks (summary)
-
-Primary ranking protocol: BEIR-EN-small via MTEB (`--no-rerank`, `bge-base-en-v1.5`). Not the overall `MTEB(eng, v2)` score.
-
-| Suite | Metric | Value |
-| :--- | :--- | :---: |
-| BEIR-EN-small (5 tasks) | mean nDCG@10 | **0.445** |
-| SciFact (MTEB) | nDCG@10 / Recall@10 | **0.733** / **0.866** |
-| Long-doc evidence (n=120) | evidence_recall@10 | 0.428 (expand Δ +0.006) |
-
-Full tables and commands: [`BENCHMARKS.md`](BENCHMARKS.md). SWE-bench `% Resolved` is an agent board, not a BasinRAG score.
-
-```powershell
-python -m basinrag.eval.run_mteb --no-rerank --tasks SciFact,NFCorpus,FiQA2018,ArguAna,SCIDOCS --output results/mteb_beir_arena
-```
-
----
-
-## Features
-
-- Hybrid RRF (BM25 + FAISS); optional hop prior; optional cross-encoder  
-- Basins / PPR for **local** briefing expansion  
-- Query router: `global` / `hybrid` / `local`  
-- Optional L3 summaries (background LLM)  
-- Atomic persistence + FastAPI `/query` and WebSocket `/chat`
-
-### Compared to other paradigms
-
-| | Vector RAG | LLM GraphRAG | **BasinRAG** |
-| :--- | :---: | :---: | :---: |
-| Index cost | Low | Very high (LLM × N) | **Low (local)** |
-| Lexical + dense | Often missing | N/A | **Yes** |
-| Doc structure for LLM | Weak | Entity graph | **Basins as briefing map** |
-
----
-
-## Installation
+From a source checkout, install the extras you intend to use:
 
 ```bash
-pip install -e ".[dev,api,ollama]"
+python -m pip install ".[api,ollama]"
 ```
+
+For development and evaluation, install `.[dev,api,eval]`. Ollama and OpenAI integrations are optional; install `.[ollama]` or `.[openai]` for the selected provider.
 
 ## Quickstart
 
 ```python
 from basinrag import BasinRAG, BasinRAGConfig
 
-rag = BasinRAG(BasinRAGConfig(storage_dir=".basinrag_index"))
+rag = BasinRAG(BasinRAGConfig(storage_dir=".basinrag-v3"))
 rag.ingest("./my_documents")
-docs = rag.query("What is the core working principle of the model?", top_k=5)
+docs = rag.query("What is the core working principle?", top_k=5)
 ```
+
+Version 2 reads only v3 snapshots. Existing v1 indexes remain untouched; explicitly rebuild from original sources into a new, empty destination before switching over:
+
+```bash
+basinrag reindex ./my_documents --storage-dir ./.basinrag-v3
+```
+
+`ingest` is additive and idempotent: new sources are added, unchanged sources are no-ops, and changed sources require `sync`. `sync` reflects changes and removals in the selected scope. A failed or racing read does not publish a partial snapshot.
 
 ```bash
 basinrag ingest ./docs
-basinrag query "What are the main findings?" --type auto --top-k 5
+basinrag sync ./docs
+basinrag query "What are the main findings?" --type hybrid --top-k 5
 basinrag chat
-basinrag serve --port 8000
+basinrag serve --host 127.0.0.1 --port 8000
 ```
+
+To call the ASGI application directly, use `uvicorn basinrag.api.server:app`. Public clients require `BASINRAG_API_KEY`; the CLI also refuses a non-loopback bind without a key. Keep the service behind a TLS-terminating reverse proxy when exposing it to a network.
 
 ## Configuration
 
-| Variable | Default | Description |
+`BasinRAGConfig` accepts explicit values. Configuration precedence is **explicit constructor/CLI arguments > process environment > `.env` > class defaults**. The process environment wins over values loaded from `.env`.
+
+| Environment variable | Default | Description |
 |---|---|---|
-| `BASINRAG_ENCODER_MODEL` | `BAAI/bge-base-en-v1.5` | Dense encoder |
-| `BASINRAG_STORAGE_DIR` | `.basinrag` | Index root |
-| `BASINRAG_LLM_PROVIDER` | `ollama` | Chat / L3 provider |
-| `BASINRAG_LLM_MODEL` | `qwen2.5` | Chat model |
+| `BASINRAG_STORAGE_DIR` | `.basinrag-v3` | New v3 index and build storage root. |
+| `BASINRAG_ENCODER_MODEL` | `BAAI/bge-base-en-v1.5` | Dense encoder. Reindex after changing the encoder. |
+| `BASINRAG_RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | Optional cross-encoder model. |
+| `BASINRAG_LLM_PROVIDER` | `ollama` | `ollama` or `openai`; chat/L3 only. |
+| `BASINRAG_LLM_MODEL` | `qwen2.5` | Chat/L3 model name. |
+| `BASINRAG_SEARCH_TYPE` | `auto` | Default retrieval mode. |
+| `BASINRAG_RANKING_MODE` | `hybrid_rrf` | `hybrid_rrf` or opt-in `experimental_topology`. |
+| `BASINRAG_USE_RERANK` | `true` | Enable the cross-encoder after retrieval. |
+| `BASINRAG_CHUNK_SIZE` | `512` | Legacy chunk size in characters. |
+| `BASINRAG_CHUNK_OVERLAP` | `128` | Legacy overlap in characters. |
+| `BASINRAG_CHUNK_SIZE_TOKENS` | unset | Optional token-based chunk limit, bounded by encoder capacity. |
+| `BASINRAG_CHUNK_OVERLAP_TOKENS` | unset | Optional token overlap; requires token chunk size. |
+| `BASINRAG_EMBEDDING_BATCH_SIZE` | `64` | Number of texts encoded per batch. |
+| `BASINRAG_MIN_CONFIDENCE` | `0.15` | Current chat abstention threshold; confidence is not a calibrated probability. |
+| `BASINRAG_QUERY_PROMPT` | BGE search instruction | Encoder query prefix. |
+| `BASINRAG_API_KEY` | unset | Required for API startup except explicit keyless local development. |
+| `BASINRAG_CORS_ORIGINS` | localhost origins | Comma-separated allowed browser origins. |
+| `BASINRAG_ENV` | `production` | `local_dev` only with explicit keyless opt-in and loopback bind. |
+| `BASINRAG_ENABLE_BACKGROUND_L3` | `false` | Enable background summarization. |
+| `BASINRAG_ALLOW_REMOTE_L3_EGRESS` | `false` | Separately opt in to sending excerpts to a remote LLM for L3. |
 
-Chunk defaults: **512 / overlap 128**. See [docs/API_REFERENCE.md](docs/API_REFERENCE.md).
+The `.env.example` file lists these settings. Legacy character-based chunk arguments remain supported; chunks that exceed the encoder’s token capacity are automatically split again, and token settings are additive. Existing indexes are not silently rewritten when chunk settings change.
 
-## Docs
+## Security notes
 
-- [BENCHMARKS.md](BENCHMARKS.md)  
-- [ARCHITECTURE.md](ARCHITECTURE.md)  
-- [docs/INDEX.md](docs/INDEX.md)  
-- [AUDIT_REPORT.md](AUDIT_REPORT.md)  
+Retrieved documents are untrusted input. They can contain misleading instructions or prompt-injection text. BasinRAG retrieval is not a sanitizer and does not guarantee that a connected LLM will ignore those instructions. Keep source collections trusted, delimit retrieved passages in application prompts, and require the generator to treat them as evidence rather than instructions.
+
+The API requires a key at startup unless `BASINRAG_ENV=local_dev` and `BASINRAG_ALLOW_KEYLESS_LOCAL=true` are both set with a loopback bind. Forwarded IP headers only affect rate limiting when the direct peer is in `BASINRAG_TRUSTED_PROXIES`; they never authenticate. L3 is off by default, and remote excerpt egress requires both L3 opt-ins.
+
+## Evaluation
+
+Benchmark artifacts already in the repository are historical and may predate the current source changes. Do not treat them as a current release score. Re-run each evaluation into a fresh output directory; the report should include the revision, model, corpus/split, configuration, requested tasks, and successful tasks. Never aggregate stale task files or report an incomplete run as a complete mean.
+
+See [BENCHMARKS.md](BENCHMARKS.md) for the reproduction protocol and metric boundaries. SWE-bench file-retrieval metrics are not SWE-bench `% Resolved`; only patches evaluated by the official Docker harness support that claim.
+
+## Documentation
+
+- [Benchmark protocol](BENCHMARKS.md)
+- [Architecture](ARCHITECTURE.md)
+- [API reference](docs/API_REFERENCE.md)
+- [Deployment guide](docs/DEPLOYMENT.md)
+- [Portuguese README](README_pt.md)
+- [Docs index](docs/INDEX.md)
 
 ## Citation
 
 ```bibtex
 @software{martins2026basinrag,
   author       = {Alex Martins},
-  title        = {BasinRAG: Hybrid BM25+FAISS RAG with Dynamical Basins as Briefing Maps},
+  title        = {BasinRAG: Hybrid Retrieval with Dynamical Basins as Briefing Maps},
   year         = {2026},
-  publisher    = {Zenodo},
-  version      = {v1.0.4},
+  publisher    = {Basinfy},
+  version      = {v1.1.0},
   doi          = {10.5281/zenodo.22664948},
   url          = {https://doi.org/10.5281/zenodo.22664948}
 }

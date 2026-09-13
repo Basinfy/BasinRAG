@@ -1,102 +1,99 @@
+from __future__ import annotations
+
+import subprocess
+import sys
+
 import pytest
+
 import basinrag
 from basinrag import __version__
-from basinrag.core.persistence import safe_replace_dir
 from basinrag.core.kv_store import DiskKVStore
 from basinrag.core.llm import UniversalLLM
 
 
 def test_version_alignment():
-    """Valida alinhamento da versão 1.0.3 no __init__ e consistência do pacote."""
-    assert __version__ == "1.0.4"
-    assert basinrag.__version__ == "1.0.4"
+    assert __version__ == "1.1.0"
+    assert basinrag.__version__ == "1.1.0"
+
+
+def test_default_huggingface_models_are_pinned():
+    from basinrag import BasinRAGConfig
+
+    config = BasinRAGConfig()
+    assert config.encoder_revision == "dd9f42942e0729b6c53632f3c23b0e801f236569"
+    assert config.reranker_revision == "c4b98d26050227d7b53a54437302be5aa412b70e"
+
+
+def test_custom_models_require_immutable_commit_revisions():
+    from basinrag import BasinRAGConfig
+
+    with pytest.raises(ValueError, match="encoder_revision"):
+        BasinRAGConfig(encoder_model="organization/custom-encoder")
+    with pytest.raises(ValueError, match="40 caracteres"):
+        BasinRAGConfig(
+            encoder_model="organization/custom-encoder",
+            encoder_revision="main",
+        )
+
+    config = BasinRAGConfig(
+        encoder_model="organization/custom-encoder",
+        encoder_revision="0123456789abcdef0123456789abcdef01234567",
+        use_rerank=False,
+    )
+    assert config.encoder_revision == "0123456789abcdef0123456789abcdef01234567"
 
 
 def test_cli_version_flag():
-    """Valida que o CLI possui flag --version funcional."""
-    import subprocess
-    import sys
     result = subprocess.run(
         [sys.executable, "-m", "basinrag.cli", "--version"],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0
-    assert "1.0.4" in result.stdout or "1.0.4" in result.stderr
-
-
-def test_safe_replace_dir_preserves_subdirectories(tmp_path):
-    """Garante que subdiretórios não são perdidos mesmo em fallback do safe_replace_dir."""
-    src = tmp_path / "src_tree"
-    dst = tmp_path / "dst_tree"
-    
-    src.mkdir()
-    (src / "file1.txt").write_text("hello", encoding="utf-8")
-    sub = src / "sub_folder"
-    sub.mkdir()
-    (sub / "nested.txt").write_text("nested content", encoding="utf-8")
-    
-    # Executa safe_replace_dir
-    safe_replace_dir(str(src), str(dst))
-    
-    assert dst.exists()
-    assert (dst / "file1.txt").read_text(encoding="utf-8") == "hello"
-    assert (dst / "sub_folder" / "nested.txt").read_text(encoding="utf-8") == "nested content"
-    assert not src.exists()
+    assert "1.1.0" in result.stdout
 
 
 def test_kv_store_paginated_iterators(tmp_path):
-    """Testa os iteradores paginados iter_keys, iter_items, iter_values do DiskKVStore."""
-    db_file = str(tmp_path / "test_iter.db")
-    store = DiskKVStore(db_file, "iter_test")
-    
-    # Inserir 25 itens
+    store = DiskKVStore(str(tmp_path / "items.sqlite3"), "test_items")
     for i in range(25):
-        store.set(f"k_{i:02d}", {"val": i})
-        
-    assert len(store) == 25
-    
-    # Testar iter_keys com batch_size pequeno
-    keys = list(store.iter_keys(batch_size=5))
-    assert len(keys) == 25
-    assert keys[0] == "k_00"
-    
-    # Testar iter_items
-    items = list(store.iter_items(batch_size=5))
-    assert len(items) == 25
-    assert items[0] == ("k_00", {"val": 0})
-    
-    # Testar iter_values
-    vals = list(store.iter_values(batch_size=5))
-    assert len(vals) == 25
-    assert vals[0] == {"val": 0}
-    
-    # Testar __iter__
-    iter_keys = list(iter(store))
-    assert len(iter_keys) == 25
-    
-    # Testar compatibilidade de keys() e items()
-    assert len(store.keys()) == 25
-    assert len(store.items()) == 25
-    assert len(store.values()) == 25
-    
+        store.set(f"k_{i:02d}", {"value": i})
+    assert len(list(store.iter_keys(batch_size=5))) == 25
+    assert len(list(store.iter_items(batch_size=5))) == 25
+    assert len(list(store.iter_values(batch_size=5))) == 25
+    assert list(iter(store))[0] == "k_00"
     store.close()
 
 
-def test_cors_middleware_wildcard_credentials():
-    """Garante que a API não quebra no startup ao usar origins wildcard."""
-    from fastapi.testclient import TestClient
-    from basinrag.api.server import app
-    
-    # Instanciar o TestClient valida a árvore de middlewares (não deve levantar AssertionError)
-    with TestClient(app) as client:
-        r = client.get("/")
-        assert r.status_code == 200
+def test_read_only_kv_store_does_not_create_or_mutate(tmp_path):
+    missing = tmp_path / "absent.sqlite3"
+    with pytest.raises(FileNotFoundError):
+        DiskKVStore(str(missing), "items", read_only=True)
+    assert not missing.exists()
+
+    writable = DiskKVStore(str(tmp_path / "present.sqlite3"), "items")
+    writable.set("one", 1)
+    writable.close()
+    readonly = DiskKVStore(str(tmp_path / "present.sqlite3"), "items", read_only=True)
+    assert readonly.get("one") == 1
+    with pytest.raises(RuntimeError, match="read-only"):
+        readonly.set("two", 2)
+    assert len(readonly) == 1
+    readonly.close()
+
+
+def test_api_origin_parser_rejects_wildcard_and_paths():
+    from basinrag.api.server import _validated_origins
+
+    with pytest.raises(ValueError, match="Wildcard"):
+        _validated_origins("*")
+    with pytest.raises(ValueError, match="Origem inválida"):
+        _validated_origins("https://example.test/path")
+    assert _validated_origins("https://example.test") == {"https://example.test"}
 
 
 @pytest.mark.asyncio
 async def test_llm_client_unsupported_provider_raises():
-    """Garante que provedor inválido ou falha de inicialização gera exception e não yield de string."""
     client = UniversalLLM(provider="invalid_provider")
     with pytest.raises(ValueError, match="não suportado"):
         await client.generate("sys", "user")

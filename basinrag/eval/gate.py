@@ -110,19 +110,46 @@ def decide(
     scifact: Dict[str, Dict[str, float]],
     longdoc: Optional[Dict[str, Dict[str, float]]],
     longdoc_basins: Optional[Dict[str, Any]],
+    *,
+    scifact_complete: bool = False,
+    qasper_complete: bool = False,
+    scifact_provenance: Optional[Dict[str, Any]] = None,
+    qasper_provenance: Optional[Dict[str, Any]] = None,
+    invalid_reasons: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Pre-registered kill switch. Do not edit thresholds after seeing numbers."""
     warnings: List[str] = []
+    if invalid_reasons:
+        return {
+            "DECISION": "GATE_INVALID",
+            "reason": "; ".join(invalid_reasons),
+            "warnings": warnings,
+        }
+    if not scifact_complete:
+        return {"DECISION": "GATE_INVALID", "reason": "full SciFact control is required", "warnings": warnings}
+    if not qasper_complete:
+        return {"DECISION": "GATE_INVALID", "reason": "complete QASPER validation is required", "warnings": warnings}
+    if not _provenance_valid(scifact_provenance, dataset="SciFact", split="test"):
+        return {"DECISION": "GATE_INVALID", "reason": "SciFact provenance is missing, sampled, or incompatible", "warnings": warnings}
+    if not _provenance_valid(qasper_provenance, dataset="QASPER", split="validation"):
+        return {"DECISION": "GATE_INVALID", "reason": "QASPER provenance is missing, sampled, or incompatible", "warnings": warnings}
+    assert scifact_provenance is not None and qasper_provenance is not None
+    if _shared_provenance(scifact_provenance) != _shared_provenance(qasper_provenance):
+        return {"DECISION": "GATE_INVALID", "reason": "SciFact and QASPER protocol provenance differs", "warnings": warnings}
+
     scifact_hybrid = _ndcg(scifact, "hybrid_min")
     scifact_topo = _ndcg(scifact, "hybrid_min_topo")
     scifact_delta = None
-    if scifact_hybrid is not None and scifact_topo is not None:
-        scifact_delta = abs(scifact_topo - scifact_hybrid)
-        if scifact_delta >= SCIFACT_DELTA_MAX and scifact_topo > scifact_hybrid:
-            warnings.append(
-                "SciFact control failed: topology gained "
-                f"{scifact_topo - scifact_hybrid:.4f} where h(v) should be 0 (leakage)."
-            )
+    if scifact_hybrid is None or scifact_topo is None:
+        return {"DECISION": "GATE_INVALID", "reason": "SciFact control systems are missing", "warnings": warnings}
+    scifact_delta = abs(scifact_topo - scifact_hybrid)
+    if scifact_delta >= SCIFACT_DELTA_MAX:
+        return {
+            "DECISION": "GATE_INVALID",
+            "reason": f"SciFact control deviation {scifact_delta:.4f} exceeds < {SCIFACT_DELTA_MAX:.3f}",
+            "scifact_delta_ndcg@10": scifact_delta,
+            "warnings": warnings,
+        }
 
     if not longdoc or not longdoc_basins:
         return {
@@ -156,11 +183,11 @@ def decide(
         }
 
     topo_gain = long_topo - long_hybrid
-    candidates = [
-        _ndcg(longdoc, name)
-        for name in ("hybrid_min_topo", "basinrag_full")
-        if _ndcg(longdoc, name) is not None
-    ]
+    candidates: List[float] = []
+    for name in ("hybrid_min_topo", "basinrag_full"):
+        candidate = _ndcg(longdoc, name)
+        if candidate is not None:
+            candidates.append(candidate)
     best_basin = max(candidates) if candidates else long_topo
     continue_b = topo_gain >= LONGDOC_TOPO_GAIN_MIN and best_basin >= (long_encoder - LONGDOC_ENCODER_SLACK)
     return {
@@ -178,6 +205,40 @@ def decide(
     }
 
 
+def _provenance_valid(provenance: Optional[Dict[str, Any]], *, dataset: str, split: str) -> bool:
+    if not isinstance(provenance, dict):
+        return False
+    dataset_revision = str(provenance.get("dataset_revision") or "").lower()
+    try:
+        n_queries = int(provenance.get("n_queries", 0))
+        n_qrels = int(provenance.get("n_qrels", 0))
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return (
+        provenance.get("dataset") == dataset
+        and provenance.get("split") == split
+        and provenance.get("complete") is True
+        and provenance.get("sampled") is False
+        and bool(provenance.get("encoder"))
+        and provenance.get("encoder_revision") not in (None, "", "unresolved", "unknown")
+        and len(dataset_revision) == 40
+        and all(char in "0123456789abcdef" for char in dataset_revision)
+        and bool(provenance.get("chunk_policy"))
+        and bool(provenance.get("protocol_version"))
+        and n_queries > 0
+        and n_qrels > 0
+    )
+
+
+def _shared_provenance(provenance: Dict[str, Any]) -> tuple:
+    return (
+        provenance.get("encoder"), provenance.get("encoder_revision"),
+        provenance.get("reranker"), provenance.get("reranker_revision"),
+        provenance.get("query_prompt"),
+        provenance.get("protocol_version"),
+    )
+
+
 def _ndcg(block: Dict[str, Dict[str, float]], system: str) -> Optional[float]:
     row = block.get(system)
     if not row or row.get("skipped"):
@@ -186,20 +247,6 @@ def _ndcg(block: Dict[str, Dict[str, float]], system: str) -> Optional[float]:
     if val is None:
         return None
     return float(val)
-
-
-def official_cache_reference(repo_root: Path) -> Dict[str, Any]:
-    """Numbers already verified from the in-repo MTEB cache — not re-run here."""
-    return {
-        "source": "results/mteb/remote + results/mteb/results (verified 2026-09-11)",
-        "SciFact": {
-            "BAAI/bge-base-en-v1.5": {"ndcg@10": 0.74345, "recall@10": 0.87422},
-            "intfloat/e5-base-v2": {"ndcg@10": 0.71944},
-            "BAAI/bge-small-en-v1.5": {"ndcg@10": 0.71273},
-            "mteb/baseline-bm25s": {"ndcg@10": 0.68736},
-            "BasinRAG-1.0.4-published": {"ndcg@10": 0.64995, "recall@10": 0.73078, "mrr@10": 0.629763},
-        },
-    }
 
 
 class GateSearcher:
@@ -265,10 +312,21 @@ class GateSearcher:
         return collapse_to_docs(self.engine, hits, top_k)
 
     def _rerank(self, query: str, hits: List[Dict[str, Any]], top_k: int) -> List[Dict[str, Any]]:
-        passages = [h.get("text") or self.engine.graph.nodes[h["id"]].get("text", "") for h in hits]
+        rerank_count = min(len(hits), max(25, top_k))
+        head = hits[:rerank_count]
+        tail = hits[rerank_count:]
+        passages = [h.get("text") or self.engine.graph.nodes[h["id"]].get("text", "") for h in head]
         scores = self.reranker.predict_scores(query, passages)
-        ranked = sorted(zip(hits, scores), key=lambda x: float(x[1]), reverse=True)
-        return [h for h, _ in ranked[:top_k]]
+        ranked = sorted(zip(head, scores), key=lambda x: (-float(x[1]), str(x[0].get("id", ""))))
+        if ranked:
+            floor = float(ranked[-1][1])
+            tail_rows = [
+                (hit, floor - (index + 1) * 1e-6)
+                for index, hit in enumerate(tail)
+            ]
+        else:
+            tail_rows = []
+        return [hit for hit, _ in (ranked + tail_rows)[:top_k]]
 
 
 def evaluate_system(

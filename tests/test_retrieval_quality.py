@@ -1,3 +1,6 @@
+import hashlib
+import re
+
 import numpy as np
 import pytest
 from unittest.mock import patch
@@ -10,8 +13,11 @@ class DummyEncoder:
     def encode(self, text, **kwargs):
         if isinstance(text, list):
             return np.stack([self.encode(t) for t in text])
-        rng = np.random.default_rng(abs(hash(str(text))) % (2**32))
-        vec = rng.random(384).astype(np.float32)
+        vec = np.zeros(384, dtype=np.float32)
+        for token in re.findall(r"[\w]+", str(text).lower()):
+            digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest()
+            slot = int.from_bytes(digest[:4], "little") % len(vec)
+            vec[slot] += 1.0
         norm = float(np.linalg.norm(vec)) or 1.0
         return vec / norm
 
@@ -34,8 +40,11 @@ def mmarco_rag(tmp_path_factory):
     storage = tmp_path_factory.mktemp("mmarco_idx")
     with patch("basinrag.factory.BasinIngestor", DummyIngestor):
         from basinrag.factory import BasinRAG, BasinRAGConfig
-        rag = BasinRAG(BasinRAGConfig(storage_dir=str(storage)))
+        rag = BasinRAG(BasinRAGConfig(
+            storage_dir=str(storage), use_rerank=False, query_prompt=""
+        ))
 
+    rag.ingestor = DummyIngestor()
     from basinrag.indexer.condensation import node_layers
 
     corpus, _ = get_mmarco_subset()
@@ -44,7 +53,7 @@ def mmarco_rag(tmp_path_factory):
         chunks.append({
             "id": doc["id"],
             "text": doc["text"],
-            "embedding": np.random.rand(384).astype(np.float32),
+            "embedding": DummyEncoder().encode(doc["text"]),
             "source": "mock",
             "chunk_index": i,
             "l1": node_layers(doc["text"])["l1"],
@@ -55,22 +64,22 @@ def mmarco_rag(tmp_path_factory):
     rag.engine.partition_into_basins()
     rag._attach_bm25()
     rag._ensure_retriever()
-    rag.retriever._reranker._model = "disabled"
     return rag
 
 
 def test_hybrid_mrr_above_threshold(mmarco_rag):
-    corpus, queries = get_mmarco_subset()
-    id_to_text = {d["id"]: d["text"] for d in corpus}
-    qrels = {q["qid"]: set(id_to_text[rid] for rid in q["relevant_doc_ids"]) for q in queries}
+    _, queries = get_mmarco_subset()
+    qrels = {q["qid"]: set(q["relevant_doc_ids"]) for q in queries}
 
     results = {}
     for q in queries:
-        docs = mmarco_rag.query(q["query"], search_type="hybrid", top_k=5)
-        results[q["qid"]] = [str(d.page_content) for d in docs]
+        packet = mmarco_rag.brief(q["query"], search_type="hybrid", top_k=5)
+        results[q["qid"]] = packet.node_ids[:10]
 
-    metrics = evaluate_retrieval(qrels, results, k=5)
-    assert metrics["mrr"] > 0.0
+    metrics = evaluate_retrieval(qrels, results, k=10)
+    assert metrics["mrr"] >= 0.9, (metrics, results)
+    assert metrics["ndcg"] >= 0.9, (metrics, results)
+    assert metrics["recall"] >= 0.95, (metrics, results)
 
 
 def test_faquad_document_retrieval():

@@ -1,4 +1,10 @@
+import json
+from types import SimpleNamespace
+
+import pytest
+
 from basinrag.eval.swebench import SWEBenchInstance, run_official_eval
+from basinrag.eval import swebench as swebench_module
 from basinrag.eval.swebench_protocol import (
     OfficialReport,
     build_eval_command,
@@ -13,6 +19,12 @@ from basinrag.eval.swebench_protocol import (
     prediction_record,
     resolve_dataset,
     write_predictions_jsonl,
+)
+from basinrag.eval.swebench import (
+    SWEBenchEvaluator,
+    _checkpoint_protocol_id,
+    _checkpoint_subset_id,
+    _matches_gold_path,
 )
 
 
@@ -130,3 +142,192 @@ def test_official_report_uses_dataset_n_not_submitted():
     )
     assert report.n_resolved == 10
     assert report.resolved_rate == 10 / 300
+
+
+def _swebench_instance(instance_id, gold_file):
+    return SWEBenchInstance(
+        instance_id=instance_id,
+        repo="psf/requests",
+        base_commit="abc123",
+        problem_statement="Handle this request correctly.",
+        patch="",
+        test_patch="",
+        fail_to_pass=[],
+        pass_to_pass=[],
+        version="2.0",
+        ground_truth_files={gold_file},
+    )
+
+
+def _checkpoint_kwargs():
+    return {
+        "split": "test",
+        "top_k": 10,
+        "search_type": "hybrid",
+        "encoder_model": "BAAI/bge-base-en-v1.5",
+        "reranker_model": "BAAI/bge-reranker-v2-m3",
+        "use_rerank": True,
+        "query_prompt": "Represent this sentence for searching relevant passages: ",
+        "ranking_mode": "hybrid_rrf",
+    }
+
+
+def test_checkpoint_reuses_only_matching_subset_and_protocol(tmp_path, monkeypatch):
+    selected = _swebench_instance("requests__requests-1", "src/requests.py")
+    subset_id = _checkpoint_subset_id([selected])
+    protocol_id = _checkpoint_protocol_id(**_checkpoint_kwargs())
+
+    matching = {
+        "instance_id": selected.instance_id,
+        "subset_id": subset_id,
+        "protocol_id": protocol_id,
+        "hit@1": True,
+        "hit@5": True,
+        "hit@10": True,
+        "recall": 1.0,
+        "mrr": 1.0,
+    }
+    outside_subset = {**matching, "instance_id": "requests__requests-2"}
+    other_protocol = {**matching, "protocol_id": "different-protocol"}
+    checkpoint = tmp_path / "checkpoint.jsonl"
+    checkpoint.write_text(
+        "\n".join(json.dumps(row) for row in (matching, outside_subset, other_protocol)) + "\n",
+        encoding="utf-8",
+    )
+
+    evaluator = SWEBenchEvaluator(workspace_root=str(tmp_path / "workspace"))
+    monkeypatch.setattr(
+        swebench_module.BasinRAG,
+        "create",
+        staticmethod(lambda **kwargs: pytest.fail("matching checkpoint should avoid rebuilding")),
+    )
+    metrics = evaluator.evaluate_retrieval(
+        [selected], checkpoint_path=str(checkpoint), **_checkpoint_kwargs()
+    )
+
+    assert metrics["instances_evaluated"] == 1
+    assert metrics["hit@1"] == 1.0
+    assert metrics["recall@10"] == 1.0
+    assert [row["instance_id"] for row in metrics["details"]] == [selected.instance_id]
+
+
+def test_checkpoint_protocol_changes_with_retrieval_settings():
+    default = _checkpoint_protocol_id(**_checkpoint_kwargs())
+    variants = (
+        {"top_k": 5},
+        {"candidate_k": 30},
+        {"ranking_mode": "experimental_topology"},
+        {"chunk_size": 900},
+        {"chunk_overlap": 100},
+        {"chunker_revision": "recursive-character-v2"},
+        {"tokenizer_policy": "pinned-tokenizer-revision-v2"},
+    )
+    for changes in variants:
+        changed = _checkpoint_protocol_id(**{**_checkpoint_kwargs(), **changes})
+        assert default != changed, changes
+
+
+def test_legacy_checkpoint_protocol_is_recomputed(tmp_path, monkeypatch):
+    import hashlib
+
+    selected = _swebench_instance("requests__requests-legacy", "src/requests.py")
+    legacy_kwargs = _checkpoint_kwargs()
+    legacy_protocol = {
+        key: legacy_kwargs[key]
+        for key in (
+            "split",
+            "top_k",
+            "search_type",
+            "encoder_model",
+            "reranker_model",
+            "use_rerank",
+            "query_prompt",
+        )
+    }
+    legacy_protocol.update(
+        dataset=swebench_module.DATASET_ID,
+        metric_version=swebench_module.CHECKPOINT_METRIC_VERSION,
+    )
+    legacy_canonical = json.dumps(
+        legacy_protocol, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+    )
+    legacy_protocol_id = hashlib.sha256(legacy_canonical.encode("utf-8")).hexdigest()
+    assert _checkpoint_protocol_id(**_checkpoint_kwargs()) != legacy_protocol_id
+
+    checkpoint = tmp_path / "legacy-checkpoint.jsonl"
+    checkpoint.write_text(
+        json.dumps(
+            {
+                "instance_id": selected.instance_id,
+                "subset_id": _checkpoint_subset_id([selected]),
+                "protocol_id": legacy_protocol_id,
+                "hit@1": False,
+                "hit@5": False,
+                "hit@10": False,
+                "recall": 0.0,
+                "mrr": 0.0,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rag = SimpleNamespace(
+        query=lambda *args, **kwargs: [SimpleNamespace(metadata={"file_path": "src/requests.py"})]
+    )
+    created_with_modes = []
+    evaluator = SWEBenchEvaluator(workspace_root=str(tmp_path / "workspace"))
+    evaluator.workspace.prepare_repo = lambda repo, commit: tmp_path
+    monkeypatch.setattr(
+        swebench_module.BasinRAG,
+        "create",
+        staticmethod(lambda **kwargs: (created_with_modes.append(kwargs["ranking_mode"]) or rag)),
+    )
+    monkeypatch.setattr(
+        swebench_module.CodeRepoIngestor,
+        "ingest_codebase",
+        staticmethod(lambda rag, repo_path: 1),
+    )
+
+    metrics = evaluator.evaluate_retrieval(
+        [selected], checkpoint_path=str(checkpoint), **_checkpoint_kwargs()
+    )
+
+    assert created_with_modes == ["hybrid_rrf"]
+    assert metrics["hit@1"] == 1.0
+    refreshed = [json.loads(line) for line in checkpoint.read_text(encoding="utf-8").splitlines()]
+    assert len(refreshed) == 2
+    assert refreshed[-1]["protocol_id"] != legacy_protocol_id
+    assert refreshed[-1]["protocol_revision"] == swebench_module.CHECKPOINT_PROTOCOL_REVISION
+    assert refreshed[-1]["ranking_mode"] == "hybrid_rrf"
+
+
+def test_evaluator_requires_exact_normalized_file_paths(tmp_path, monkeypatch):
+    instance = _swebench_instance("requests__requests-3", "src/utils.py")
+    fake_rag = SimpleNamespace(
+        query=lambda *args, **kwargs: [
+            SimpleNamespace(metadata={"file_path": "utils.py"})
+        ]
+    )
+    evaluator = SWEBenchEvaluator(workspace_root=str(tmp_path / "workspace"))
+    evaluator.workspace.prepare_repo = lambda repo, commit: tmp_path
+    monkeypatch.setattr(
+        swebench_module.BasinRAG,
+        "create",
+        staticmethod(lambda **kwargs: fake_rag),
+    )
+    monkeypatch.setattr(
+        swebench_module.CodeRepoIngestor,
+        "ingest_codebase",
+        staticmethod(lambda rag, repo_path: 1),
+    )
+
+    metrics = evaluator.evaluate_retrieval(
+        [instance], checkpoint_path=None, **_checkpoint_kwargs()
+    )
+
+    assert metrics["instances_evaluated"] == 1
+    assert metrics["hit@1"] == metrics["hit@5"] == metrics["hit@10"] == 0.0
+    assert metrics["recall@10"] == metrics["mrr"] == 0.0
+    assert _matches_gold_path("src\\utils.py", {"src/utils.py"})
+    assert not _matches_gold_path("utils.py", {"src/utils.py"})

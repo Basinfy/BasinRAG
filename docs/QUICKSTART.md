@@ -24,7 +24,7 @@ Ou clone + mesmo comando na raiz do repo.
 from basinrag import BasinRAG, BasinRAGConfig
 
 config = BasinRAGConfig(
-    storage_dir=".basinrag",
+    storage_dir=".basinrag-v3",
     encoder_model="BAAI/bge-base-en-v1.5",  # padrão
 )
 rag = BasinRAG(config)

@@ -7,8 +7,7 @@ try:
 except Exception:
     pass
 
-import numpy as np
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional, cast
 
 from mteb.models.model_meta import ModelMeta
 
@@ -31,7 +30,8 @@ class BasinRAGMTEBWrapper:
         max_queries: Optional[int] = None,
         force_reindex: bool = False,
         title_boost: int = 1,
-        use_hop_prior: bool = True,
+        use_hop_prior: bool = False,
+        ranking_mode: str = "hybrid_rrf",
         use_rerank: Optional[bool] = None,
         cache_tag: str = "",
         auto_disable_rerank_on_flat: bool = True,
@@ -44,13 +44,28 @@ class BasinRAGMTEBWrapper:
         self.max_queries = max_queries
         self.force_reindex = force_reindex
         self.title_boost = max(1, int(title_boost))
-        self.use_hop_prior = use_hop_prior
+        if ranking_mode not in {"hybrid_rrf", "experimental_topology"}:
+            raise ValueError(f"Unsupported MTEB ranking mode: {ranking_mode}")
+        self.ranking_mode = ranking_mode
+        self.use_hop_prior = bool(use_hop_prior)
         # Default off for flat (1 node/doc) corpora — CE was the main published SciFact drop.
         self.use_rerank = use_rerank
         self.auto_disable_rerank_on_flat = auto_disable_rerank_on_flat
         self.cache_tag = cache_tag
         self.max_corpus_docs = max_corpus_docs
         self._is_flat_index = False
+
+    @property
+    def effective_ranking_parameters(self) -> Dict[str, Any]:
+        """Return the topology/ranking switches that this wrapper will actually use."""
+        experimental = self.ranking_mode == "experimental_topology"
+        return {
+            "ranking_mode": self.ranking_mode,
+            "use_hop_prior": self.use_hop_prior,
+            "use_multi_signal_drf": experimental,
+            # The published RRF baseline must not change candidates through graph walks.
+            "expand_graph": experimental and not self._is_flat_index,
+        }
 
     def index(
         self,
@@ -67,13 +82,12 @@ class BasinRAGMTEBWrapper:
 
         task_name = getattr(task_metadata, "name", None) or "unknown"
         expected_tag = self.cache_tag or f"{task_name}|{hf_split}|{hf_subset}"
-        stored_tag = getattr(self.rag.engine, "gate_cache_tag", "")
-        cache_ok = (
+        loaded = (
             not self.force_reindex
             and self.rag.persistence.load_topology(self.rag.engine)
-            and len(self.rag.engine.graph) > 0
-            and (not stored_tag or stored_tag == expected_tag)
         )
+        stored_tag = getattr(self.rag.engine, "gate_cache_tag", "")
+        cache_ok = loaded and len(self.rag.engine.graph) > 0 and stored_tag == expected_tag
         if cache_ok:
             print(f"[MTEB Wrapper] Cache hit ({len(self.rag.engine.graph)} nós, tag={expected_tag})")
             self.rag._attach_bm25()
@@ -130,14 +144,31 @@ class BasinRAGMTEBWrapper:
                 "metadata": {"doc_id": str(doc_id), "id": str(doc_id)},
             })
 
+        expected_build_id = self.rag.persistence.current_build_id()
         print("[MTEB Wrapper] Construindo Bacias de Atração e Grafo Funcional...")
         self.rag.engine.encoder_model = self.rag.config.encoder_model
-        self.rag.engine.gate_cache_tag = expected_tag
         self.rag.engine.build_graph(nodes)
         self.rag.engine.partition_into_basins()
+        self.rag.engine.build_id = expected_build_id
+        splitter = getattr(self.rag.ingestor, "splitter", None)
+        tokenizer = getattr(splitter, "tokenizer", None)
+        self.rag.engine.index_metadata = {
+            "format_version": 2,
+            "encoder_model": self.rag.config.encoder_model,
+            "tokenizer": getattr(tokenizer, "name_or_path", None)
+            or self.rag.config.encoder_model,
+            **self.rag._chunk_policy_metadata(self.rag.config),
+            "embedding_batch_size": self.rag.config.embedding_batch_size,
+            "ranking_mode": self.rag.config.ranking_mode,
+            "sources": self.rag._source_manifest(nodes),
+            "source_file_hashes": {},
+            "gate_cache_tag": expected_tag,
+        }
+        self.rag.engine.gate_cache_tag = expected_tag
         self.rag._attach_bm25()
         self.rag.retriever = None
-        self.rag.persistence.save_topology(self.rag.engine)
+        if not self.rag.persistence.save_topology(self.rag.engine):
+            raise RuntimeError("MTEB não conseguiu publicar o snapshot do corpus")
         self._is_flat_index = True  # MTEB wrapper always indexes 1 node per doc
 
     def _detect_flat_index(self) -> bool:
@@ -208,9 +239,12 @@ class BasinRAGMTEBWrapper:
                     qtext,
                     query_emb,
                     top_k=pool_k,
-                    use_hop_prior=self.use_hop_prior,
+                    use_hop_prior=self.effective_ranking_parameters["use_hop_prior"],
+                    use_multi_signal_drf=self.effective_ranking_parameters[
+                        "use_multi_signal_drf"
+                    ],
                     use_confidence_gate=False,
-                    expand_graph=not self._is_flat_index,
+                    expand_graph=self.effective_ranking_parameters["expand_graph"],
                 )
 
             if not ranked_nodes:
@@ -281,7 +315,7 @@ class BasinRAGMTEBWrapper:
             release_date="2026-09-10",
             languages=["eng", "por"],
             framework=["PyTorch", "Sentence Transformers"],
-            similarity_fn_name="cosine",
+            similarity_fn_name=cast(Any, "cosine"),
             use_instructions=bool(self.query_prompt),
             reference="https://github.com/Basinfy/BasinRAG",
             license="apache-2.0",

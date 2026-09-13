@@ -8,7 +8,7 @@ import numpy as np
 from ..core.topology import BasinTopologyEngine
 from ..indexer.bm25 import BM25Index
 from .briefing import MIN_CONFIDENCE
-from .fusion import DEFAULT_HOP_MISSING, apply_hop_prior, ranked_ids, weighted_rrf
+from .fusion import DEFAULT_HOP_MISSING, apply_hop_prior, multi_signal_drf, ranked_ids, weighted_rrf
 from .local_search import TopologicalLocalSearch
 
 
@@ -18,13 +18,18 @@ class HybridSearch:
     def __init__(self, engine: BasinTopologyEngine, local_search: TopologicalLocalSearch):
         self.engine = engine
         self.local_search = local_search
-        self._bm25 = engine.bm25
-        if self._bm25 is None:
-            self._bm25 = BM25Index()
+        bm25: Optional[BM25Index] = engine.bm25
+        if bm25 is None:
+            bm25 = BM25Index()
+            self._bm25 = bm25
             self._rebuild_bm25()
-            engine.bm25 = self._bm25
+            engine.bm25 = bm25
+        else:
+            self._bm25 = bm25
 
     def _rebuild_bm25(self):
+        if self._bm25 is None:
+            return
         nodes = list(self.engine.graph.nodes(data=True))
         if not nodes:
             return
@@ -94,17 +99,23 @@ class HybridSearch:
         query: str,
         query_embedding: np.ndarray,
         top_k: int = 5,
-        use_hop_prior: bool = True,
+        use_hop_prior: bool = False,
+        use_multi_signal_drf: bool = False,
         use_confidence_gate: bool = True,
         candidate_k: Optional[int] = None,
         hop_missing: str = DEFAULT_HOP_MISSING,
-        expand_graph: bool = True,
+        expand_graph: bool = False,
         expand_max_extra: int = 100,
     ) -> List[Dict[str, Any]]:
         if self._bm25 is None or self._bm25.n == 0:
             hits = self.local_search.dense_hits(query_embedding, top_k=top_k)
             if use_confidence_gate and (not hits or hits[0]["score"] < MIN_CONFIDENCE):
                 return []
+            for item in hits:
+                dense_score = max(0.0, float(item.get("score", 0.0)))
+                item["rank_score"] = float(item.get("score", 0.0))
+                item["dense_score"] = dense_score
+                item["confidence"] = dense_score
             return hits
 
         ck = self.resolve_candidate_k(top_k, candidate_k)
@@ -126,31 +137,44 @@ class HybridSearch:
                 seed_pool, max_extra=expand_max_extra, sequential_radius=2
             )
 
-        all_candidate_ids = set(bm25_ids) | set(semantic_ids) | set(expanded_ids)
+        all_candidate_ids = list(dict.fromkeys(bm25_ids + semantic_ids + expanded_ids))
+        candidate_set = set(all_candidate_ids)
         # Expanded-only nodes get weak semantic ranks after the dense list for RRF.
         fused_semantic_ids = list(semantic_ids)
         for nid in expanded_ids:
             if nid not in semantic_ids and nid not in bm25_ids:
                 fused_semantic_ids.append(nid)
 
-        seeds = (set(semantic_ids[:3]) | set(bm25_ids[:3])) & all_candidate_ids
+        seeds = list(dict.fromkeys(semantic_ids[:3] + bm25_ids[:3]))
+        seeds = [nid for nid in seeds if nid in candidate_set]
         if not seeds:
-            seeds = set(list(all_candidate_ids)[:3])
+            seeds = all_candidate_ids[:3]
 
         hops: Dict[str, int] = {s: 0 for s in seeds}
-        q_bfs = deque((s, 0) for s in seeds)
-        while q_bfs:
-            curr, d = q_bfs.popleft()
-            if curr in self.engine.graph:
-                for nbr in self.engine.graph.neighbors(curr):
-                    if nbr in all_candidate_ids and nbr not in hops:
-                        hops[nbr] = d + 1
-                        q_bfs.append((nbr, d + 1))
+        if use_hop_prior or use_multi_signal_drf:
+            q_bfs = deque((s, 0) for s in seeds)
+            while q_bfs:
+                curr, d = q_bfs.popleft()
+                if curr in self.engine.graph:
+                    for nbr in self.engine.graph.neighbors(curr):
+                        if nbr in candidate_set and nbr not in hops:
+                            hops[nbr] = d + 1
+                            q_bfs.append((nbr, d + 1))
 
         scores = weighted_rrf(bm25_ids, fused_semantic_ids)
-        scores = apply_hop_prior(
-            scores, hops, enabled=use_hop_prior, missing=hop_missing
-        )
+        if use_hop_prior:
+            scores = apply_hop_prior(scores, hops, enabled=True, missing=hop_missing)
+
+        if use_multi_signal_drf:
+            cohesion_map = {}
+            for nid in all_candidate_ids:
+                bid = self.engine.basin_id_of(nid)
+                if bid and bid in self.engine.basins:
+                    cohesion_map[nid] = self.engine.basins[bid].cohesion
+            scores = multi_signal_drf(
+                scores, hops, cohesion=cohesion_map, enabled=True
+            )
+
         order = ranked_ids(scores, top_k)
 
         dense_map = {item["id"]: max(0.0, float(item["score"])) for item in semantic}
@@ -165,7 +189,7 @@ class HybridSearch:
             data = self.engine.graph.nodes[nid]
             d_score = dense_map.get(nid, 0.0)
             b_score = bm25_norm_map.get(nid, 0.0)
-            calibrated_score = float(np.clip(scores.get(nid, 0.0) * 60.0, 0.0, 1.0))
+            rank_score = float(scores.get(nid, 0.0))
             results.append({
                 "id": nid,
                 "text": data.get("text", ""),
@@ -173,7 +197,11 @@ class HybridSearch:
                 "basin_id": data.get("basin_id", ""),
                 "l1": data.get("l1", ""),
                 "l2": data.get("l2", ""),
-                "score": calibrated_score,
+                # Keep the rank score separate from the raw dense-similarity
+                # support signal used by the chat abstention heuristic.
+                "score": rank_score,
+                "rank_score": rank_score,
+                "confidence": d_score,
                 "dense_score": d_score,
                 "bm25_score": b_score,
                 "metadata": data.get("metadata") or {},

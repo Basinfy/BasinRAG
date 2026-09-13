@@ -10,7 +10,19 @@ MAX_SATELLITES = 4
 
 
 def estimate_tokens(text: str) -> int:
-    return max(1, len(text) // 4)
+    """Conservative script-aware fallback when a generator tokenizer is unavailable."""
+    if not text:
+        return 0
+    def is_cjk(char):
+        return (
+            "\u3040" <= char <= "\u30ff"
+            or "\u3400" <= char <= "\u9fff"
+            or "\uac00" <= char <= "\ud7af"
+        )
+
+    cjk = sum(1 for char in text if is_cjk(char))
+    other = sum(1 for char in text if not char.isspace() and not is_cjk(char))
+    return cjk + max(0, (other + 1) // 2)
 
 
 def cap_satellite(text: str) -> str:
@@ -32,22 +44,17 @@ class BriefingPacket:
         """Raw passages only — never mix L3 headers into the cross-encoder."""
         return list(self.hubs) + list(self.neighbors)
 
-    def as_context(self, max_tokens: int = 2000) -> str:
+    def as_context(self, max_tokens: int = 2000, token_counter=None) -> str:
         chunks: List[str] = []
-        used = 0
-        sats = [cap_satellite(s) for s in self.satellites[:MAX_SATELLITES] if s]
-        if sats:
-            sat = " | ".join(sats)
-            chunks.append(f"[Satellites]\n{sat}")
-            used += estimate_tokens(sat)
-        for label, items in (("Hubs", self.hubs), ("Neighbors", self.neighbors)):
+        count = token_counter or estimate_tokens
+        for label, items in (("Hubs", self.hubs), ("Neighbors", self.neighbors), ("Satellites", self.satellites[:MAX_SATELLITES])):
             body: List[str] = []
             for item in items:
-                cost = estimate_tokens(item)
-                if used + cost > max_tokens:
+                rendered = f"[{label}]\n" + "\n\n".join(body + [cap_satellite(item) if label == "Satellites" else item])
+                trial = "\n\n".join(chunks + [rendered])
+                if count(trial) > max_tokens:
                     break
-                body.append(item)
-                used += cost
+                body.append(cap_satellite(item) if label == "Satellites" else item)
             if body:
                 chunks.append(f"[{label}]\n" + "\n\n".join(body))
         return "\n\n".join(chunks)

@@ -1,4 +1,6 @@
-# BasinRAG vs. outros paradigmas
+# Registro histórico: BasinRAG vs. outros paradigmas
+
+> Arquivado: tabelas, métricas e alegações abaixo pertencem a versões e protocolos anteriores. Não descrevem BasinRAG 1.1.0 e não podem ser usados como claims de release.
 
 **Atualizado:** setembro 2026  
 **Números:** [`BENCHMARKS.md`](../BENCHMARKS.md)
@@ -29,14 +31,9 @@ BasinRAG é um **RAG híbrido local (BM25 + FAISS)** com grafo funcional e **bac
 
 \*Embeddings locais ou API — distinto de extração de entidades.
 
-### Ranking (híbrido BasinRAG, MTEB `--no-rerank`)
+### Métricas
 
-| Suite | nDCG@10 |
-| :--- | :---: |
-| BEIR-EN-small (média 5 tarefas) | **0.445** |
-| SciFact | **0.733** |
-
-SciFact gate `hybrid_min` = 0.734; dense puro = 0.740 neste corpus. Números em [`BENCHMARKS.md`](../BENCHMARKS.md).
+Valores numéricos deste registro foram removidos por não atenderem ao protocolo atual. Não há métrica quantitativa vigente aprovada para esta release. Consulte [`BENCHMARKS.md`](../BENCHMARKS.md) para os critérios de uma execução futura.
 
 ---
 

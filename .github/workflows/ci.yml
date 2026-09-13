@@ -1,40 +1,91 @@
 name: BasinRAG CI
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main, master]
   pull_request:
   workflow_dispatch:
-    inputs:
-      python-version:
-        description: 'Versão do Python para teste'
-        required: false
-        default: '3.11'
-        type: choice
-        options:
-          - '3.11'
-          - '3.10'
-          - '3.12'
 
 jobs:
-  test:
+  quality:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install locked development dependencies
+        run: uv sync --locked --extra dev --extra api --extra eval --extra nlp
+      - name: Ruff
+        run: uv run ruff check .
+      - name: Mypy
+        run: uv run mypy basinrag
+      - name: Package and public import smoke tests
+        run: |
+          uv run basinrag --help
+          uv run python -c "import basinrag; from basinrag import BasinRAG, BasinRAGConfig; assert basinrag.__version__ == '1.1.0'; assert BasinRAGConfig().storage_dir == '.basinrag-v3'; assert BasinRAG is not None"
+          uv run python -c "import basinrag.api.server; import langchain_ollama; import langchain_openai"
+          uv run python -m build
+      - name: Wheel and sdist clean-install smoke tests
+        shell: bash
+        run: |
+          python -m venv /tmp/basinrag-wheel
+          /tmp/basinrag-wheel/bin/python -m pip install 'dist/basinrag-1.1.0-py3-none-any.whl[api,ollama,openai]'
+          /tmp/basinrag-wheel/bin/python -c "from basinrag import BasinRAG, BasinRAGConfig; import basinrag.api.server, langchain_ollama, langchain_openai; assert BasinRAGConfig().storage_dir == '.basinrag-v3'"
+          /tmp/basinrag-wheel/bin/basinrag --help
+          python -m venv /tmp/basinrag-sdist
+          /tmp/basinrag-sdist/bin/python -m pip install dist/basinrag-1.1.0.tar.gz[api,ollama,openai]
+          /tmp/basinrag-sdist/bin/python -c "from basinrag import BasinRAG, BasinRAGConfig; import basinrag.api.server; assert BasinRAGConfig().storage_dir == '.basinrag-v3'"
+          /tmp/basinrag-sdist/bin/basinrag --help
+      - name: Docker context contract
+        run: uv run python -m pytest tests/test_release_contracts.py -q
+      - name: Build hardened Docker image
+        run: docker build --build-arg BASINRAG_PROVIDER_EXTRA=ollama -t basinrag-ci .
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ inputs.python-version || '3.11' }}
-        cache: 'pip'
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install locked test dependencies
+        run: uv sync --locked --extra dev --extra api --extra eval --extra nlp
+      - name: CLI help must not initialize models
+        run: uv run basinrag --help
+      - name: Full suite and global coverage gate
+        run: uv run python -m pytest --cov=basinrag --cov-report=term-missing --cov-fail-under=70 tests/
+      - name: Security, persistence, and gate coverage gates
+        run: |
+          uv run python -m pytest tests/test_api.py --cov=basinrag.api.server --cov-report=term-missing --cov-fail-under=85
+          uv run python -m pytest tests/test_core.py tests/test_convert_c.py --cov=basinrag --cov-report=term-missing --cov-fail-under=0
+          uv run coverage report --include=basinrag/core/persistence.py --fail-under=85
+          uv run python -m pytest tests/test_gate.py --cov=basinrag.eval.gate --cov-report=term-missing --cov-fail-under=85
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[dev]"
-
-    - name: Run Ruff Lint
-      run: ruff check .
-
-    - name: Tests + Coverage
-      run: pytest --cov=basinrag --cov-report=term-missing tests/
+  windows-persistence-cli:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install locked Windows test dependencies
+        run: uv sync --locked --extra dev --extra api --extra nlp
+      - name: Persistence and CLI regressions
+        run: uv run python -m pytest tests/test_core.py tests/test_convert_c.py tests/test_cli.py tests/test_api.py -q
+      - name: Export pinned dependency set
+        run: |
+          uv export --locked --format requirements-txt --no-emit-project --all-extras --no-default-groups --output-file "$env:RUNNER_TEMP\basinrag-requirements.txt" | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Dependency audit
+        run: uv run pip-audit --strict --no-deps --requirement "$env:RUNNER_TEMP\basinrag-requirements.txt"

@@ -1,7 +1,6 @@
 # Índice Geral da Documentação do BasinRAG
 
-**BasinRAG:** RAG híbrido **BM25 + FAISS** com bacias como **mapa de briefing**.  
-Visão geral: [README](../README_pt.md) · Números: [`BENCHMARKS.md`](../BENCHMARKS.md).
+**BasinRAG:** RAG híbrido **BM25 + FAISS** com bacias experimentais como **mapa de briefing**. Métricas históricas não são claims de release.
 
 ## Navegação rápida
 
@@ -9,16 +8,16 @@ Visão geral: [README](../README_pt.md) · Números: [`BENCHMARKS.md`](../BENCHM
 |------|-----------|---------|
 | [Quickstart](QUICKSTART.md) | Instalar, ingest, query, chat | Desenvolvedores |
 | [README](../README_pt.md) | Visão do produto | Todos |
-| [Benchmarks](../BENCHMARKS.md) | BEIR-EN-small, evidence/passage, SWE-bench (sonda) | ML / pesquisa |
-| [Comparativo de paradigmas](BENCHMARK_COMPARISON_pt.md) | Dense / GraphRAG-class / BasinRAG | Arquitetos |
+| [Protocolo de avaliação](../BENCHMARKS.md) | Critérios reproduzíveis; sem números vigentes | ML / pesquisa |
 | [Arquitetura](../ARCHITECTURE.md) | Pipelines de ingestão e retrieval | Engenheiros |
 | [Teoria](THEORY.md) | φ, atratores, bacias, ρ | Pesquisadores |
 | [API](API_REFERENCE.md) | SDK, config, REST / WebSocket | Backend |
 | [Deploy](DEPLOYMENT.md) | Produção | DevOps |
+| [Release 1.1.0](RELEASE_1.1.0.md) | Migração v3, rollout e evidências de validação | Mantenedores |
 | [Multilíngue](MULTILINGUAL.md) | Stemmers / cross-lingual | IA |
 | [Exemplo de bacias](exemplo_bacias.md) | Walkthrough de topologia | Curiosos |
-| [Auditoria](../AUDIT_REPORT.md) | Auditoria | Mantenedores |
-| [Arquivo v1.0.0](archive/AUDIT_REPORT_v1.0.0.md) | Auditoria histórica | Mantenedores |
+| [Auditoria histórica v1.0.4](archive/AUDIT_REPORT_v1.0.4.md) | Checkout e protocolo anteriores; não descreve v2 | Mantenedores |
+| [Auditoria histórica v1.0.0](archive/AUDIT_REPORT_v1.0.0.md) | Registro de uma versão anterior; não descreve v2 | Mantenedores |
 
 ## Mapa de leitura
 
@@ -27,10 +26,9 @@ Visão geral: [README](../README_pt.md) · Números: [`BENCHMARKS.md`](../BENCHM
 2. [API](API_REFERENCE.md)  
 3. [Deploy](DEPLOYMENT.md)
 
-### Métricas e posicionamento
+### Avaliação
 1. [README](../README_pt.md)  
-2. [Benchmarks](../BENCHMARKS.md)  
-3. [Comparativo](BENCHMARK_COMPARISON_pt.md)
+2. [Protocolo de avaliação](../BENCHMARKS.md)
 
 ### Teoria e estrutura
 1. [Teoria](THEORY.md)  

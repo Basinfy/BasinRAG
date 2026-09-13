@@ -7,21 +7,118 @@ Reference: https://www.swebench.com/lite.html (arXiv:2310.06770)
 from __future__ import annotations
 
 import os
-import re
 import json
+import hashlib
 import argparse
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+from pathlib import PurePosixPath
 from typing import List, Dict, Set, Any, Optional
 
-import unidiff
 from datasets import load_dataset
 
-from ..factory import BasinRAG
+from ..factory import BasinRAG, BasinRAGConfig
+from ..contracts import SearchType
 from ..logging_config import setup_logging
 
 logger = setup_logging()
+
+from .swebench_protocol import docker_available, build_eval_command
+
+DATASET_ID = "SWE-bench/SWE-bench_Lite"
+CHECKPOINT_METRIC_VERSION = "exact-path-v1"
+CHECKPOINT_PROTOCOL_REVISION = "swebench-retrieval-v2"
+CODE_CHUNKER_REVISION = "recursive-character-v1"
+CODE_CHUNK_SIZE = 1200
+CODE_CHUNK_OVERLAP = 150
+CODE_CHUNK_SEPARATORS = ("\nclass ", "\ndef ", "\n\n", "\n", " ")
+EMBEDDING_TOKENIZER_POLICY = "sentence-transformers-default-for-encoder-id-unpinned-v1"
+
+
+def _normalise_repo_path(path: str) -> str:
+    """Normalize separators and harmless leading './' without fuzzy matching."""
+    value = (path or "").strip().replace("\\", "/")
+    while value.startswith("./"):
+        value = value[2:]
+    return PurePosixPath(value).as_posix() if value else ""
+
+
+def _matches_gold_path(path: str, gold_files: Set[str]) -> bool:
+    candidate = _normalise_repo_path(path)
+    return bool(candidate) and candidate in {_normalise_repo_path(gold) for gold in gold_files}
+
+
+def _checkpoint_protocol_id(
+    *,
+    split: str,
+    top_k: int,
+    search_type: str,
+    encoder_model: str,
+    reranker_model: str,
+    use_rerank: bool,
+    query_prompt: str,
+    ranking_mode: str,
+    candidate_k: Optional[int] = None,
+    chunk_size: int = CODE_CHUNK_SIZE,
+    chunk_overlap: int = CODE_CHUNK_OVERLAP,
+    chunker_revision: str = CODE_CHUNKER_REVISION,
+    tokenizer_policy: str = EMBEDDING_TOKENIZER_POLICY,
+) -> str:
+    protocol = {
+        "protocol_revision": CHECKPOINT_PROTOCOL_REVISION,
+        "dataset": DATASET_ID,
+        "split": split,
+        "top_k": int(top_k),
+        "candidate_k": int(candidate_k if candidate_k is not None else max(20, top_k)),
+        "search_type": search_type,
+        "ranking_mode": ranking_mode,
+        "encoder_model": encoder_model,
+        "reranker_model": reranker_model,
+        "use_rerank": bool(use_rerank),
+        "query_prompt": query_prompt,
+        "chunking": {
+            "implementation": "langchain_text_splitters.RecursiveCharacterTextSplitter",
+            "revision": chunker_revision,
+            "length_unit": "unicode-code-points",
+            "size": int(chunk_size),
+            "overlap": int(chunk_overlap),
+            "separators": list(CODE_CHUNK_SEPARATORS),
+            "embedding_tokenizer_policy": tokenizer_policy,
+        },
+        "metric_version": CHECKPOINT_METRIC_VERSION,
+    }
+    canonical = json.dumps(protocol, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _checkpoint_subset_id(instances: List["SWEBenchInstance"]) -> str:
+    subset = sorted(
+        (
+            instance.instance_id,
+            instance.repo,
+            instance.base_commit,
+            instance.problem_statement,
+            sorted(_normalise_repo_path(path) for path in instance.ground_truth_files),
+        )
+        for instance in instances
+    )
+    canonical = json.dumps(subset, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def run_official_eval(
+    dataset: str,
+    *,
+    gold: bool = False,
+    predictions: Optional[str] = None,
+    run_id: str,
+    **kwargs,
+):
+    if not docker_available():
+        raise RuntimeError("Docker is required to run official SWE-bench evaluation")
+    cmd = build_eval_command(dataset, gold=gold, predictions=predictions, run_id=run_id, **kwargs)
+    subprocess.run(cmd, check=True)
 
 
 @dataclass
@@ -71,25 +168,9 @@ class SWEBenchInstance:
 
     @staticmethod
     def extract_patch_files(patch_str: str) -> Set[str]:
-        if not patch_str:
-            return set()
-        files = set()
-        try:
-            patch_set = unidiff.PatchSet(patch_str)
-            for patched_file in patch_set:
-                target = patched_file.target_file or patched_file.source_file
-                if target:
-                    if target.startswith("a/") or target.startswith("b/"):
-                        target = target[2:]
-                    if target != "/dev/null":
-                        files.add(target.strip())
-        except Exception:
-            # Fallback com regex padrao Git
-            matches = re.findall(r"^diff --git a/(.*?) b/(.*?)$", patch_str, re.MULTILINE)
-            for src, dst in matches:
-                target = dst if src == "/dev/null" else src
-                files.add(target.strip())
-        return files
+        from .swebench_protocol import gold_files_from_patch
+
+        return gold_files_from_patch(patch_str)
 
 
 class RepoWorkspaceManager:
@@ -129,9 +210,9 @@ class CodeRepoIngestor:
         from ..core.ids import make_node_id
 
         splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1200,
-            chunk_overlap=150,
-            separators=["\nclass ", "\ndef ", "\n\n", "\n", " "],
+            chunk_size=CODE_CHUNK_SIZE,
+            chunk_overlap=CODE_CHUNK_OVERLAP,
+            separators=list(CODE_CHUNK_SEPARATORS),
         )
 
         # Blindagem metodológica contra vazamento de dados:
@@ -148,7 +229,7 @@ class CodeRepoIngestor:
         logger.info(f"Ingerindo {len(code_files)} arquivos Python de {repo_path.name}...")
 
         all_texts = []
-        chunk_metadata = []
+        chunk_metadata: list[dict[str, str | int]] = []
 
         for fpath in code_files:
             rel_path = fpath.relative_to(repo_path).as_posix()
@@ -179,14 +260,17 @@ class CodeRepoIngestor:
 
         nodes = []
         for meta, emb in zip(chunk_metadata, embeddings):
-            layers = node_layers(meta["text"])
-            node_id = make_node_id(meta["source"], meta["chunk_index"], meta["text"])
+            source = str(meta["source"])
+            chunk_index = int(meta["chunk_index"])
+            text = str(meta["text"])
+            layers = node_layers(text)
+            node_id = make_node_id(source, chunk_index, text)
             nodes.append({
                 "id": node_id,
-                "text": meta["text"],
+                "text": text,
                 "embedding": emb,
-                "source": meta["source"],
-                "chunk_index": meta["chunk_index"],
+                "source": source,
+                "chunk_index": chunk_index,
                 "l1": layers["l1"],
                 "l2": layers["l2"],
                 "metadata": {"file_path": meta["rel_path"]},
@@ -214,8 +298,8 @@ class SWEBenchEvaluator:
         limit: Optional[int] = None,
         limit_per_repo: Optional[int] = None,
     ) -> List[SWEBenchInstance]:
-        logger.info(f"Carregando dataset 'SWE-bench/SWE-bench_Lite' ({split})...")
-        ds = load_dataset("SWE-bench/SWE-bench_Lite", split=split)
+        logger.info(f"Carregando dataset '{DATASET_ID}' ({split})...")
+        ds = load_dataset(DATASET_ID, split=split)
 
         repo_targets = set(r.strip() for r in repo_filter.split(",")) if repo_filter else None
         repo_counts: Dict[str, int] = {}
@@ -238,9 +322,15 @@ class SWEBenchEvaluator:
         self,
         instances: List[SWEBenchInstance],
         top_k: int = 10,
-        search_type: str = "hybrid",
+        search_type: SearchType = "hybrid",
         storage_dir: str = ".basinrag/eval_temp",
         checkpoint_path: Optional[str] = "logs/swebench_100_results.jsonl",
+        split: str = "test",
+        encoder_model: str = "BAAI/bge-base-en-v1.5",
+        reranker_model: str = "BAAI/bge-reranker-v2-m3",
+        use_rerank: bool = True,
+        query_prompt: str = "Represent this sentence for searching relevant passages: ",
+        ranking_mode: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Executa avaliação de Fault Localization / Retrieval com checkpoint incremental.
@@ -252,6 +342,26 @@ class SWEBenchEvaluator:
         total_mrr = 0.0
         valid_count = 0
         per_instance_results = []
+        selected_instance_ids = {inst.instance_id for inst in instances}
+        subset_id = _checkpoint_subset_id(instances)
+        config = (
+            BasinRAGConfig.from_env()
+            if ranking_mode is None
+            else BasinRAGConfig.from_env(ranking_mode=ranking_mode)
+        )
+        effective_ranking_mode = config.ranking_mode
+        candidate_k = max(20, top_k)
+        protocol_id = _checkpoint_protocol_id(
+            split=split,
+            top_k=top_k,
+            candidate_k=candidate_k,
+            search_type=search_type,
+            encoder_model=encoder_model,
+            reranker_model=reranker_model,
+            use_rerank=use_rerank,
+            query_prompt=query_prompt,
+            ranking_mode=effective_ranking_mode,
+        )
 
         completed_records: Dict[str, Dict[str, Any]] = {}
         if checkpoint_path and Path(checkpoint_path).exists():
@@ -261,7 +371,13 @@ class SWEBenchEvaluator:
                     if line:
                         try:
                             rec = json.loads(line)
-                            completed_records[rec["instance_id"]] = rec
+                            instance_id = rec.get("instance_id")
+                            if (
+                                instance_id in selected_instance_ids
+                                and rec.get("subset_id") == subset_id
+                                and rec.get("protocol_id") == protocol_id
+                            ):
+                                completed_records[instance_id] = rec
                         except Exception:
                             pass
             logger.info(f"Retomando do checkpoint: {len(completed_records)} instâncias já avaliadas.")
@@ -307,7 +423,14 @@ class SWEBenchEvaluator:
                 first = group[0]
                 repo_dir = self.workspace.prepare_repo(first.repo, first.base_commit)
 
-                rag = BasinRAG.create(storage_dir=storage_dir)
+                rag = BasinRAG.create(
+                    storage_dir=storage_dir,
+                    encoder_model=encoder_model,
+                    reranker_model=reranker_model,
+                    use_rerank=use_rerank,
+                    query_prompt=query_prompt,
+                    ranking_mode=effective_ranking_mode,
+                )
                 n_chunks = CodeRepoIngestor.ingest_codebase(rag, repo_dir)
                 logger.info(f"Índice construído: {n_chunks} chunks para {first.repo}@{first.base_commit[:8]}")
 
@@ -316,7 +439,7 @@ class SWEBenchEvaluator:
                     if not gt_files:
                         continue
 
-                    docs = rag.query(inst.problem_statement, search_type=search_type, top_k=max(20, top_k))
+                    docs = rag.query(inst.problem_statement, search_type=search_type, top_k=candidate_k)
 
                     retrieved_files = []
                     for doc in docs:
@@ -327,8 +450,12 @@ class SWEBenchEvaluator:
 
                     valid_count += 1
 
+                    normalized_gt_files = {
+                        _normalise_repo_path(gt) for gt in gt_files if _normalise_repo_path(gt)
+                    }
+
                     def matches_gt(f: str) -> bool:
-                        return any(f == gt or gt.endswith(f) or f.endswith(gt) for gt in gt_files)
+                        return _normalise_repo_path(f) in normalized_gt_files
 
                     is_hit_1 = any(matches_gt(f) for f in retrieved_files[:1])
                     is_hit_5 = any(matches_gt(f) for f in retrieved_files[:5])
@@ -341,13 +468,18 @@ class SWEBenchEvaluator:
                     if is_hit_10:
                         hit_10 += 1
 
-                    found_gt = sum(1 for gt in gt_files if any(matches_gt(f) for f in retrieved_files[:top_k]))
-                    recall = found_gt / float(len(gt_files)) if gt_files else 0.0
+                    retrieved_top_k = {
+                        _normalise_repo_path(f)
+                        for f in retrieved_files[:top_k]
+                        if _normalise_repo_path(f)
+                    }
+                    found_gt = len(normalized_gt_files & retrieved_top_k)
+                    recall = found_gt / float(len(normalized_gt_files)) if normalized_gt_files else 0.0
                     total_recall += recall
 
                     mrr = 0.0
-                    for rank, f in enumerate(retrieved_files[:top_k], 1):
-                        if matches_gt(f):
+                    for rank, retrieved_file in enumerate(retrieved_files[:top_k], 1):
+                        if matches_gt(retrieved_file):
                             mrr = 1.0 / rank
                             break
                     total_mrr += mrr
@@ -356,6 +488,17 @@ class SWEBenchEvaluator:
                         "instance_id": inst.instance_id,
                         "repo": inst.repo,
                         "ground_truth_files": list(gt_files),
+                        "subset_id": subset_id,
+                        "protocol_id": protocol_id,
+                        "protocol_revision": CHECKPOINT_PROTOCOL_REVISION,
+                        "ranking_mode": effective_ranking_mode,
+                        "candidate_k": candidate_k,
+                        "chunking_protocol": {
+                            "revision": CODE_CHUNKER_REVISION,
+                            "size": CODE_CHUNK_SIZE,
+                            "overlap": CODE_CHUNK_OVERLAP,
+                            "embedding_tokenizer_policy": EMBEDDING_TOKENIZER_POLICY,
+                        },
                         "retrieved_files_top5": retrieved_files[:5],
                         "hit@1": is_hit_1,
                         "hit@5": is_hit_5,
@@ -416,6 +559,12 @@ def main():
     parser.add_argument("--limit-per-repo", type=int, default=None, help="Número de instâncias por repositório")
     parser.add_argument("--top_k", type=int, default=10, help="Top K arquivos recuperados")
     parser.add_argument("--search-type", type=str, default="hybrid", help="Estratégia de busca (hybrid, auto, local, global)")
+    parser.add_argument(
+        "--ranking-mode",
+        choices=("hybrid_rrf", "experimental_topology"),
+        default=None,
+        help="Modo de ranking; por padrão usa BASINRAG_RANKING_MODE ou hybrid_rrf",
+    )
     parser.add_argument("--split", type=str, default="test", help="Split do dataset (test)")
     parser.add_argument("--checkpoint", type=str, default="logs/swebench_fair_benchmark.jsonl", help="Caminho do arquivo de checkpoint jsonl")
     parser.add_argument("--inspect-only", action="store_true", help="Apenas carregar e inspecionar os dados")
@@ -446,6 +595,8 @@ def main():
         top_k=args.top_k,
         search_type=args.search_type,
         checkpoint_path=args.checkpoint,
+        split=args.split,
+        ranking_mode=args.ranking_mode,
     )
 
     print("\n" + "=" * 60)
@@ -458,7 +609,7 @@ def main():
         print(f"  Arquivos do Bug (Ground Truth): {d['ground_truth_files']}")
         print("  Top-5 Arquivos Recuperados pelo BasinRAG:")
         for r_rank, r_file in enumerate(d.get("retrieved_files_top5", []), 1):
-            is_match = " [MATCH!]" if any(r_file == gt or gt.endswith(r_file) or r_file.endswith(gt) for gt in d['ground_truth_files']) else ""
+            is_match = " [MATCH!]" if _matches_gold_path(r_file, set(d["ground_truth_files"])) else ""
             print(f"    {r_rank}. {r_file}{is_match}")
         print(f"  Recall: {d.get('recall', 0.0) * 100:.1f}% | MRR: {d.get('mrr', 0.0):.3f}")
 

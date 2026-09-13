@@ -46,7 +46,7 @@ def load_beir_dataset(dataset_dir: str, split: str = "test") -> Tuple[Dict, Dict
             q = json.loads(line)
             queries[q["_id"]] = q["text"]
             
-    qrels = {}
+    qrels: Dict[str, set[str]] = {}
     qrels_path = os.path.join(dataset_dir, "qrels", f"{split}.tsv")
     if os.path.exists(qrels_path):
         with open(qrels_path, "r", encoding="utf-8") as f:

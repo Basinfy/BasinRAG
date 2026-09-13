@@ -36,23 +36,35 @@ class TopologicalBasin:
 class BasinTopologyEngine:
     """Undirected proximity graph + functional successor Ï† for basins."""
 
-    def __init__(self, section_size: int = DEFAULT_SECTION_SIZE, max_hops: int = 50, storage_dir: Optional[str] = None):
+    def __init__(
+        self,
+        section_size: int = DEFAULT_SECTION_SIZE,
+        storage_dir: Optional[str] = None,
+        *,
+        open_stores: bool = True,
+    ):
         self.graph = nx.Graph()
         self.basins: Dict[str, TopologicalBasin] = {}
         
-        self.storage_dir = storage_dir or ".basinrag"
+        self.storage_dir = storage_dir or ".basinrag-v3"
         import os
-        from .kv_store import DiskKVStore
-        os.makedirs(self.storage_dir, exist_ok=True)
         self._kv_dir = self.storage_dir
-        self.successor = DiskKVStore(os.path.join(self._kv_dir, "successor.db"), "successor")
-        self.attractor_of = DiskKVStore(os.path.join(self._kv_dir, "attractor.db"), "attractor_of")
+        self.successor: Any
+        self.attractor_of: Any
+        if open_stores:
+            from .kv_store import DiskKVStore
+            os.makedirs(self.storage_dir, exist_ok=True)
+            self.successor = DiskKVStore(os.path.join(self._kv_dir, "successor.db"), "successor")
+            self.attractor_of = DiskKVStore(os.path.join(self._kv_dir, "attractor.db"), "attractor_of")
+        else:
+            self.successor = {}
+            self.attractor_of = {}
         
         self.section_size = section_size
-        self.max_hops = max_hops
-        self.bm25 = None
+        self.bm25: Any = None
         self.encoder_model: str = ""
         self.build_id: str = ""
+        self.index_metadata: Dict[str, Any] = {}
 
     def close_stores(self) -> None:
         for store in (getattr(self, "successor", None), getattr(self, "attractor_of", None)):
@@ -62,14 +74,19 @@ class BasinTopologyEngine:
                 except Exception:
                     pass
 
-    def reopen_stores(self, directory: Optional[str] = None) -> None:
+    def reopen_stores(self, directory: Optional[str] = None, *, read_only: bool = False) -> None:
         import os
         from .kv_store import DiskKVStore
         self.close_stores()
         self._kv_dir = directory or self.storage_dir
-        os.makedirs(self._kv_dir, exist_ok=True)
-        self.successor = DiskKVStore(os.path.join(self._kv_dir, "successor.db"), "successor")
-        self.attractor_of = DiskKVStore(os.path.join(self._kv_dir, "attractor.db"), "attractor_of")
+        if not read_only:
+            os.makedirs(self._kv_dir, exist_ok=True)
+        self.successor = DiskKVStore(
+            os.path.join(self._kv_dir, "successor.db"), "successor", read_only=read_only
+        )
+        self.attractor_of = DiskKVStore(
+            os.path.join(self._kv_dir, "attractor.db"), "attractor_of", read_only=read_only
+        )
 
     def reset(self) -> None:
         self.graph.clear()
@@ -80,6 +97,7 @@ class BasinTopologyEngine:
             self.attractor_of.clear()
         self.bm25 = None
         self.build_id = ""
+        self.index_metadata = {}
 
     def build_graph(self, chunks: List[Dict[str, Any]]):
         """Rebuild from chunks. Always clears first so re-ingest cannot append."""
@@ -122,28 +140,8 @@ class BasinTopologyEngine:
             for i in range(len(ids) - 1):
                 self.graph.add_edge(ids[i], ids[i + 1], weight=1.0, type="sequential")
 
-        nodes = list(self.graph.nodes(data=True))
-        n_chunks = len(nodes)
-        if n_chunks > 1:
-            embeddings = np.array([n[1]["embedding"] for n in nodes], dtype=np.float32)
-            index = build_ip_index(embeddings)
-            k = min(6, n_chunks)
-            query = np.ascontiguousarray(embeddings, dtype=np.float32)
-            import faiss
-            faiss.normalize_L2(query)
-            _D, I = index.search(query, k)
-            for i in range(n_chunks):
-                n1_id = nodes[i][0]
-                for j in range(1, k):
-                    neighbor_idx = int(I[i][j])
-                    if neighbor_idx < 0:
-                        continue
-                    n2_id = nodes[neighbor_idx][0]
-                    if n1_id == n2_id or self.graph.has_edge(n1_id, n2_id):
-                        continue
-                    sim = float(_D[i][j])
-                    if sim > 0.85:
-                        self.graph.add_edge(n1_id, n2_id, weight=sim, type="virtual-edge")
+        # Note: virtual-edge linking is deferred to _link_semantic_neighbors(),
+        # called after partition_into_basins() to enable across-basin filtering.
 
         emb_map = {nid: data["embedding"] for nid, data in self.graph.nodes(data=True)
                    if "embedding" in data}
@@ -157,7 +155,94 @@ class BasinTopologyEngine:
             for k, v in successor_dict.items():
                 self.successor[k] = v
 
-    def partition_into_basins(self, preserve_l3: Optional[Dict[str, Dict[str, Any]]] = None):
+    MAX_SEMANTIC_DEGREE = 5
+    SEMANTIC_SIM_THRESHOLD = 0.85
+
+    def _link_semantic_neighbors(self):
+        """Inject kNN virtual edges across different basins only.
+
+        Adapted from BasinMind's cross-basin semantic synapses:
+        - Only creates edges between nodes in DIFFERENT basins
+        - Caps virtual-edge degree at MAX_SEMANTIC_DEGREE per node
+        - Requires cosine similarity >= SEMANTIC_SIM_THRESHOLD
+        """
+        import faiss
+
+        # Remove existing virtual edges
+        virtual_edges = [(u, v) for u, v, d in self.graph.edges(data=True) if d.get("type") == "virtual-edge"]
+        self.graph.remove_edges_from(virtual_edges)
+
+        nodes = list(self.graph.nodes(data=True))
+        n_chunks = len(nodes)
+        if n_chunks <= 1:
+            return
+
+        embeddings = np.array([n[1]["embedding"] for n in nodes], dtype=np.float32)
+        index = build_ip_index(embeddings)
+        query = np.ascontiguousarray(embeddings, dtype=np.float32)
+        faiss.normalize_L2(query)
+        virtual_degree = {node_id: 0 for node_id, _ in nodes}
+        search_rows = np.arange(n_chunks, dtype=np.int64)
+        k = min(n_chunks, 32)
+        for _pass in range(3):
+            if len(search_rows) == 0 or k <= 1:
+                break
+            distances, indices = index.search(query[search_rows], k)
+            candidates = {}
+            for row, source_idx in enumerate(search_rows):
+                n1_id = nodes[int(source_idx)][0]
+                n1_basin = self.graph.nodes[n1_id].get("basin_id", "")
+                for neighbor_idx, score in zip(indices[row], distances[row]):
+                    neighbor_idx = int(neighbor_idx)
+                    if neighbor_idx < 0 or neighbor_idx == int(source_idx):
+                        continue
+                    n2_id = nodes[neighbor_idx][0]
+                    if self.graph.has_edge(n1_id, n2_id):
+                        continue
+                    sim = float(score)
+                    if sim < self.SEMANTIC_SIM_THRESHOLD:
+                        continue
+                    n2_basin = self.graph.nodes[n2_id].get("basin_id", "")
+                    if n1_basin and n2_basin and n1_basin == n2_basin:
+                        continue
+                    pair = tuple(sorted((int(source_idx), neighbor_idx)))
+                    candidates[pair] = max(sim, candidates.get(pair, -1.0))
+
+            ordered = sorted(
+                candidates.items(),
+                key=lambda item: (-item[1], str(nodes[item[0][0]][0]), str(nodes[item[0][1]][0])),
+            )
+            additions = 0
+            for (i, j), similarity in ordered:
+                n1_id, n2_id = nodes[i][0], nodes[j][0]
+                if self.graph.has_edge(n1_id, n2_id):
+                    continue
+                if (
+                    virtual_degree[n1_id] >= self.MAX_SEMANTIC_DEGREE
+                    or virtual_degree[n2_id] >= self.MAX_SEMANTIC_DEGREE
+                ):
+                    continue
+                self.graph.add_edge(n1_id, n2_id, weight=similarity, type="virtual-edge")
+                virtual_degree[n1_id] += 1
+                virtual_degree[n2_id] += 1
+                additions += 1
+            if additions == 0:
+                break
+            search_rows = np.asarray(
+                [i for i, node in enumerate(nodes)
+                 if virtual_degree[node[0]] < self.MAX_SEMANTIC_DEGREE],
+                dtype=np.int64,
+            )
+            if k >= min(n_chunks, 128) or not len(search_rows):
+                break
+            k = min(n_chunks, 128, k * 2)
+
+    def partition_into_basins(
+        self,
+        preserve_l3: Optional[Dict[str, Dict[str, Any]]] = None,
+        *,
+        experimental_topology: bool = False,
+    ):
         """Partition along Ï† (sequential successor), not PageRank."""
         logger.info("Criando bacias de atracao (grafo funcional)...")
         if not self.graph.nodes:
@@ -228,6 +313,12 @@ class BasinTopologyEngine:
                     basin.rho_tree.nodes[attr]["l3_summary"] = saved.get("l3_summary", "")
                     basin.rho_tree.nodes[attr]["l3_source"] = "llm"
             self.basins[attr] = basin
+
+        # Virtual links are expensive and experimental; hybrid RRF does not need them.
+        virtual_edges = [(u, v) for u, v, data in self.graph.edges(data=True) if data.get("type") == "virtual-edge"]
+        self.graph.remove_edges_from(virtual_edges)
+        if experimental_topology:
+            self._link_semantic_neighbors()
 
         logger.info(f"  Atratores identificados: {len(self.basins)}")
 

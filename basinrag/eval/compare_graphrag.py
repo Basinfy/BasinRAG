@@ -14,7 +14,7 @@ import json
 import time
 import argparse
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, TypedDict
 from collections import defaultdict
 
 from ..factory import BasinRAG
@@ -23,6 +23,25 @@ from .swebench import SWEBenchEvaluator, SWEBenchInstance, CodeRepoIngestor
 from .graphrag_baseline import GraphRAGBaseline
 
 logger = setup_logging()
+
+
+_SystemMetrics = TypedDict(
+    "_SystemMetrics",
+    {
+        "hit@1": int,
+        "hit@5": int,
+        "hit@10": int,
+        "total_recall": float,
+        "total_mrr": float,
+        "latencies_ms": List[float],
+        "build_times_s": List[float],
+    },
+)
+
+
+class _ComparisonMetrics(TypedDict):
+    basinrag: _SystemMetrics
+    graphrag: _SystemMetrics
 
 
 class ComparativeBenchmarker:
@@ -50,8 +69,8 @@ class ComparativeBenchmarker:
         # Carrega instâncias já avaliadas do checkpoint
         completed_records: Dict[str, Dict[str, Any]] = {}
         if checkpoint_path and Path(checkpoint_path).exists():
-            with open(checkpoint_path, "r", encoding="utf-8") as f:
-                for line in f:
+            with open(checkpoint_path, "r", encoding="utf-8") as checkpoint_file:
+                for line in checkpoint_file:
                     line = line.strip()
                     if line:
                         try:
@@ -62,7 +81,7 @@ class ComparativeBenchmarker:
             logger.info(f"Retomando do checkpoint: {len(completed_records)} instâncias já avaliadas.")
 
         # Inicializa acumuladores de métricas
-        metrics = {
+        metrics: _ComparisonMetrics = {
             "basinrag": {
                 "hit@1": 0, "hit@5": 0, "hit@10": 0,
                 "total_recall": 0.0, "total_mrr": 0.0,
@@ -142,10 +161,10 @@ class ComparativeBenchmarker:
                 corpus_dict: Dict[str, str] = {}
                 chunk_to_file: Dict[str, str] = {}
 
-                for fpath in code_files:
-                    rel_path = fpath.relative_to(repo_dir).as_posix()
+                for code_path in code_files:
+                    rel_path = code_path.relative_to(repo_dir).as_posix()
                     try:
-                        content = fpath.read_text(encoding="utf-8", errors="ignore")
+                        content = code_path.read_text(encoding="utf-8", errors="ignore")
                     except Exception:
                         continue
                     splits = splitter.split_text(content)
@@ -181,8 +200,11 @@ class ComparativeBenchmarker:
                     total_evaluated += 1
 
                     # Helper para checar match com Ground Truth
-                    def matches_gt(f: str) -> bool:
-                        return any(f == gt or gt.endswith(f) or f.endswith(gt) for gt in gt_files)
+                    def matches_gt(file_path: str) -> bool:
+                        return any(
+                            file_path == gt or gt.endswith(file_path) or file_path.endswith(gt)
+                            for gt in gt_files
+                        )
 
                     # --- Query no BasinRAG ---
                     t0_q_basin = time.perf_counter()
@@ -192,18 +214,20 @@ class ComparativeBenchmarker:
 
                     basin_files = []
                     for doc in basin_docs:
-                        fpath = doc.metadata.get("file_path") or doc.metadata.get("source") or ""
-                        norm_path = fpath.replace("\\", "/").strip()
+                        raw_path = doc.metadata.get("file_path") or doc.metadata.get("source") or ""
+                        norm_path = str(raw_path).replace("\\", "/").strip()
                         if norm_path and norm_path not in basin_files:
                             basin_files.append(norm_path)
 
                     basin_hit1 = any(matches_gt(f) for f in basin_files[:1])
                     basin_hit5 = any(matches_gt(f) for f in basin_files[:5])
                     basin_hit10 = any(matches_gt(f) for f in basin_files[:10])
-                    basin_recall = sum(1 for gt in gt_files if any(matches_gt(f) for f in basin_files[:top_k])) / float(len(gt_files))
+                    basin_recall = sum(
+                        any(matches_gt(path) for path in basin_files[:top_k]) for _gt in gt_files
+                    ) / float(len(gt_files))
                     basin_mrr = 0.0
-                    for rank, f in enumerate(basin_files[:top_k], 1):
-                        if matches_gt(f):
+                    for rank, file_path in enumerate(basin_files[:top_k], 1):
+                        if matches_gt(file_path):
                             basin_mrr = 1.0 / rank
                             break
 
@@ -220,18 +244,20 @@ class ComparativeBenchmarker:
                     metrics["graphrag"]["latencies_ms"].append(graph_latency)
 
                     graph_files = []
-                    for chunk_id, score in graph_ranked_chunks:
-                        fpath = chunk_to_file.get(chunk_id, "")
-                        if fpath and fpath not in graph_files:
-                            graph_files.append(fpath)
+                    for chunk_id, _score in graph_ranked_chunks:
+                        file_path = chunk_to_file.get(chunk_id, "")
+                        if file_path and file_path not in graph_files:
+                            graph_files.append(file_path)
 
                     graph_hit1 = any(matches_gt(f) for f in graph_files[:1])
                     graph_hit5 = any(matches_gt(f) for f in graph_files[:5])
                     graph_hit10 = any(matches_gt(f) for f in graph_files[:10])
-                    graph_recall = sum(1 for gt in gt_files if any(matches_gt(f) for f in graph_files[:top_k])) / float(len(gt_files))
+                    graph_recall = sum(
+                        any(matches_gt(path) for path in graph_files[:top_k]) for _gt in gt_files
+                    ) / float(len(gt_files))
                     graph_mrr = 0.0
-                    for rank, f in enumerate(graph_files[:top_k], 1):
-                        if matches_gt(f):
+                    for rank, file_path in enumerate(graph_files[:top_k], 1):
+                        if matches_gt(file_path):
                             graph_mrr = 1.0 / rank
                             break
 
@@ -279,7 +305,7 @@ class ComparativeBenchmarker:
         self.print_summary_table(summary)
         return summary
 
-    def _compute_summary(self, metrics: Dict[str, Any], total_evaluated: int, records: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _compute_summary(self, metrics: _ComparisonMetrics, total_evaluated: int, records: List[Dict[str, Any]]) -> Dict[str, Any]:
         b_lat = metrics["basinrag"]["latencies_ms"]
         g_lat = metrics["graphrag"]["latencies_ms"]
         b_bld = metrics["basinrag"]["build_times_s"]

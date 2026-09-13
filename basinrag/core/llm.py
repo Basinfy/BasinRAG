@@ -1,6 +1,7 @@
 import asyncio
 import logging
-from typing import AsyncGenerator
+import math
+from typing import Any, AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +14,66 @@ class UniversalLLM:
     def __init__(self, provider: str = "ollama", model_name: str = "llama3"):
         self.provider = provider.lower()
         self.model_name = model_name
-        self._llm = None
+        self._llm: Any = None
+        self._tokenizer: Any = None
+        self._tokenizer_checked = False
+
+    def count_tokens(self, text: str) -> int:
+        """Count with the generator tokenizer when available, else conservatively by script."""
+        text = text or ""
+        if not text:
+            return 0
+        if not self._tokenizer_checked:
+            self._tokenizer_checked = True
+            if self.provider in ("openai", "open-ai"):
+                try:
+                    import tiktoken
+                    try:
+                        self._tokenizer = tiktoken.encoding_for_model(self.model_name)
+                    except KeyError:
+                        self._tokenizer = tiktoken.get_encoding("cl100k_base")
+                except Exception:
+                    self._tokenizer = None
+            else:
+                try:
+                    from transformers import AutoTokenizer
+                    self._tokenizer = AutoTokenizer.from_pretrained(
+                        self.model_name,
+                        local_files_only=True,
+                        trust_remote_code=False,
+                    )
+                except Exception:
+                    self._tokenizer = None
+        if self._tokenizer is not None:
+            try:
+                if hasattr(self._tokenizer, "encode"):
+                    try:
+                        return len(self._tokenizer.encode(text, add_special_tokens=False))
+                    except TypeError:
+                        return len(self._tokenizer.encode(text))
+                return len(self._tokenizer(text)["input_ids"])
+            except Exception:
+                pass
+
+        cjk = 0
+        latin = 0
+        punctuation = 0
+        for char in text:
+            if char.isspace():
+                continue
+            if (
+                "\u3040" <= char <= "\u30ff"
+                or "\u3400" <= char <= "\u9fff"
+                or "\uac00" <= char <= "\ud7af"
+            ):
+                cjk += 1
+            elif char.isalnum() or char == "_":
+                latin += 1
+            else:
+                punctuation += 1
+        # Roughly 2.5 Latin letters per token is intentionally conservative;
+        # CJK ideographs often consume one token each.
+        return max(1, cjk + math.ceil(latin / 2.5) + math.ceil(punctuation / 2))
 
     def _ensure_ollama(self):
         if self._llm is not None:
@@ -79,3 +139,4 @@ class UniversalLLM:
                 delay = RETRY_BASE_DELAY * (2 ** attempt)
                 logger.warning(f"LLM tentativa {attempt+1} falhou, retry em {delay}s: {e}")
                 await asyncio.sleep(delay)
+        raise RuntimeError("Loop de retry LLM terminou inesperadamente")

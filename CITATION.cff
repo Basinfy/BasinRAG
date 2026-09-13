@@ -1,10 +1,11 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
-title: "BasinRAG: High-Performance Topological Retrieval-Augmented Generation via Dynamical Basins"
+title: "BasinRAG: Hybrid Retrieval with Dynamical Basins as Briefing Maps"
 authors:
   - family-names: "Martins"
     given-names: "Alex"
-version: 1.0.3
+    affiliation: "Basinfy"
+version: 1.1.0
 doi: 10.5281/zenodo.22664948
 date-released: 2026-09-08
 repository-code: "https://github.com/Basinfy/BasinRAG"

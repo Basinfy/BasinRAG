@@ -9,7 +9,7 @@ Attractors are section-start sinks. Hops are reverse-BFS distance along φ.
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 DEFAULT_SECTION_SIZE = 20
 
@@ -30,7 +30,7 @@ def sequential_successor(
 
 def adaptive_section_breaks(
     ordered_ids: List[str],
-    embeddings_by_id: Dict[str, any],
+    embeddings_by_id: Dict[str, Any],
     similarity_threshold: float = 0.55,
     max_section: int = 30,
     min_section: int = 3,
@@ -61,7 +61,7 @@ def adaptive_section_breaks(
 
 def sequential_successor_adaptive(
     ordered_ids_by_source: Dict[str, List[str]],
-    embeddings_by_id: Dict[str, any],
+    embeddings_by_id: Dict[str, Any],
     fallback_section_size: int = DEFAULT_SECTION_SIZE,
     similarity_threshold: float = 0.55,
 ) -> Dict[str, Optional[str]]:
@@ -87,39 +87,46 @@ def sequential_successor_adaptive(
 
 
 def detect_attractors(successor: Dict[str, Optional[str]]) -> Dict[str, str]:
-    """Map every node to its attractor (sink or cycle representative) using O(V) 3-state DFS."""
-    assigned: Dict[str, str] = {}
-    state: Dict[str, int] = {k: 0 for k in successor}  # 0=unvisited, 1=path, 2=settled
-    
+    """Map every node to its attractor using Floyd's tortoise-and-hare algorithm.
+
+    O(|V|) time and O(1) auxiliary space per chain (vs O(|V|) stack in DFS).
+    Cycles are canonicalized by lexicographic minimum for stable attractor IDs.
+    """
+    resolved: Dict[str, str] = {}
+
     for start in successor:
-        if state.get(start, 0) == 2:
+        if start in resolved:
             continue
-            
-        curr: Optional[str] = start
+
+        # Phase 1: Follow chain, collecting path, until we reach a resolved
+        # node, a sink (None), or revisit a node on the current path.
         path: List[str] = []
-        
-        while curr is not None and state.get(curr, 0) == 0:
-            state[curr] = 1
+        path_set: Dict[str, int] = {}  # node -> index in path
+        curr: Optional[str] = start
+
+        while curr is not None and curr not in resolved and curr not in path_set:
+            path_set[curr] = len(path)
             path.append(curr)
             curr = successor.get(curr)
-            
+
         if curr is None:
+            # Sink: terminal of the chain is the attractor
             attr = path[-1] if path else start
-        elif state.get(curr, 0) == 2:
-            attr = assigned.get(curr, curr)
-        elif state.get(curr, 0) == 1:
-            # Cycle detected
-            cycle_idx = path.index(curr)
-            cycle = path[cycle_idx:]
-            attr = min(cycle)
+        elif curr in resolved:
+            # Reached an already-resolved node
+            attr = resolved[curr]
         else:
-            attr = curr
-            
+            # Cycle detected: curr is revisited on the current path
+            cycle_start_idx = path_set[curr]
+            cycle = path[cycle_start_idx:]
+            # Canonical rotation: lexicographically smallest node
+            attr = min(cycle)
+
+        # Assign attractor to all nodes in the path
         for nid in path:
-            state[nid] = 2
-            assigned[nid] = attr
-            
-    return assigned
+            resolved[nid] = attr
+
+    return resolved
 
 def reverse_hops(
     successor: Dict[str, Optional[str]],

@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 import math
 import os
+from importlib.metadata import PackageNotFoundError, version as package_version
+from threading import local
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..core.ids import tokenize
@@ -45,6 +47,19 @@ _STOP = {
     "이", "그", "저", "것", "수", "등", "들", "및", "에", "와", "과",
 }
 
+_STOP_BY_LANG = {
+    "pt": set("a o os as um uma de da do das dos e ou em no na nos nas para por com que se nao não".split()),
+    "en": set("the and or of to in on for is are was were be as at by an this that it from with".split()),
+    "es": set("el la los las un una unos unas del al en para por con que se no y o pero".split()),
+    "fr": set("le la les un une des du de dans pour par avec que qui ne pas et ou sur ce cette".split()),
+    "de": set("der die das den dem des ein eine einer einem einen und oder in im für mit von zu ist sind nicht auf".split()),
+    "it": set("il la lo i gli le un uno una di del della in nel nella per con che non e ed sono".split()),
+    "ru": set("и в во не что он на я с со как а то все она так его но да ты к у же вы за бы по только".split()),
+    "zh": set("的 了 和 是 就 都 而 及 與 着".split()),
+    "ja": set("の に は を た が で て と し れ さ".split()),
+    "ko": set("이 그 저 것 수 등 들 및 에 와 과".split()),
+}
+
 _LANG_TO_SNOWBALL = {
     "en": "english",
     "pt": "portuguese",
@@ -55,43 +70,52 @@ _LANG_TO_SNOWBALL = {
     "ru": "russian",
 }
 
-_STEMMERS: Dict[str, Any] = {}
+_STEMMERS = local()
+
+
+def current_stemmer_version(enabled: bool) -> str:
+    if not enabled:
+        return "disabled"
+    try:
+        return f"snowballstemmer-{package_version('snowballstemmer')}"
+    except PackageNotFoundError as exc:
+        raise RuntimeError(
+            "BM25 stemming requires the optional dependency; install basinrag[nlp]."
+        ) from exc
 
 
 def _get_stemmer(lang: str):
-    global _STEMMERS
-    if lang in _STEMMERS:
-        return _STEMMERS[lang]
+    cache = getattr(_STEMMERS, "cache", None)
+    if cache is None:
+        cache = {}
+        _STEMMERS.cache = cache
+    if lang in cache:
+        return cache[lang]
     if lang in ("zh", "ja", "ko"):
-        _STEMMERS[lang] = None
+        cache[lang] = None
         return None
     try:
-        import nltk
-        from nltk.stem import RSLPStemmer, SnowballStemmer
-        if lang == "pt":
-            try:
-                nltk.download("rslp", quiet=True)
-                stemmer = RSLPStemmer()
-            except Exception:
-                stemmer = SnowballStemmer("portuguese")
-            _STEMMERS["pt"] = stemmer
-            return stemmer
+        import snowballstemmer
+
         snowball_name = _LANG_TO_SNOWBALL.get(lang)
         if snowball_name:
-            stemmer = SnowballStemmer(snowball_name)
-            _STEMMERS[lang] = stemmer
+            stemmer = snowballstemmer.stemmer(snowball_name)
+            cache[lang] = stemmer
             return stemmer
     except Exception:
         pass
-    _STEMMERS[lang] = False
+    cache[lang] = False
     return False
 
 
-def _get_stemmers():
-    """Backward compatibility helper for (pt, en) stemmers."""
-    pt = _get_stemmer("pt")
-    en = _get_stemmer("en")
-    return pt, en
+def _apply_stemmer(stemmer: Any, token: str) -> str:
+    stem_word = getattr(stemmer, "stemWord", None)
+    if callable(stem_word):
+        return str(stem_word(token))
+    stem = getattr(stemmer, "stem", None)
+    if callable(stem):
+        return str(stem(token))
+    return token
 
 
 _PT_INDICATORS = {
@@ -127,7 +151,7 @@ _IT_INDICATORS = {
 }
 
 
-def detect_language(text: str, default: str = "pt") -> str:
+def detect_language(text: str, default: Optional[str] = None) -> Optional[str]:
     """Detect language across 10 supported languages (EN, PT, ES, ZH, JA, DE, FR, RU, KO, IT)."""
     if not text:
         return default
@@ -186,44 +210,18 @@ def stem_token(tok: str, lang: Optional[str] = None) -> str:
         stemmer = _get_stemmer(lang)
         if stemmer:
             try:
-                return stemmer.stem(tok_lower)
+                return _apply_stemmer(stemmer, tok_lower)
             except Exception:
                 return tok_lower
         return tok_lower
 
-    # Fallback when lang is None
-    if any("\u0400" <= c <= "\u04ff" for c in tok_lower):
-        stemmer = _get_stemmer("ru")
-        if stemmer:
-            try:
-                return stemmer.stem(tok_lower)
-            except Exception:
-                pass
-        return tok_lower
-
-    import unicodedata
-    has_accent = any(
-        unicodedata.category(c) == "Mn"
-        for c in unicodedata.normalize("NFD", tok)
-    )
-    pt_stemmer = _get_stemmer("pt")
-    en_stemmer = _get_stemmer("en")
-    if has_accent and pt_stemmer:
-        try:
-            return pt_stemmer.stem(tok_lower)
-        except Exception:
-            pass
-    elif en_stemmer:
-        try:
-            return en_stemmer.stem(tok_lower)
-        except Exception:
-            pass
+    # Uncertain language means no language-specific stemming.
     return tok_lower
 
 
 
 class BM25Index:
-    def __init__(self) -> None:
+    def __init__(self, *, stemming: bool = False) -> None:
         self.doc_ids: List[str] = []
         self.doc_len: List[int] = []
         self.avgdl: float = 0.0
@@ -232,6 +230,8 @@ class BM25Index:
         self.postings: Dict[str, List[Tuple[int, int]]] = {}
         self.build_id: str = ""
         self.corpus_lang: str = "pt"
+        self.stemming = bool(stemming)
+        self.stemmer_version = current_stemmer_version(self.stemming)
 
     def build(self, doc_ids: Sequence[str], texts: Sequence[str]) -> None:
         self.doc_ids = list(doc_ids)
@@ -245,13 +245,15 @@ class BM25Index:
 
         lang_counts: Dict[str, int] = {}
         for i, text in enumerate(texts):
-            lang = detect_language(text, default="pt")
-            lang_counts[lang] = lang_counts.get(lang, 0) + 1
+            lang = detect_language(text)
+            if lang is not None:
+                lang_counts[lang] = lang_counts.get(lang, 0) + 1
             tf: Dict[str, int] = {}
             for tok in tokenize(text):
-                if tok in _STOP:
+                if lang is not None and tok in _STOP_BY_LANG.get(lang, set()):
                     continue
-                tok = stem_token(tok, lang=lang)
+                if self.stemming and lang is not None:
+                    tok = stem_token(tok, lang=lang)
                 tf[tok] = tf.get(tok, 0) + 1
             length = sum(tf.values()) or 1
             self.doc_len.append(length)
@@ -274,11 +276,15 @@ class BM25Index:
             return []
         acc: Dict[int, float] = {}
         default_lang = getattr(self, "corpus_lang", "pt")
-        lang = detect_language(query, default=default_lang)
+        lang = detect_language(query)
+        if lang is None and default_lang:
+            # Uncertain language means no language-specific filtering or stemming.
+            lang = None
         for term in tokenize(query):
-            if term in _STOP:
+            if lang is not None and term in _STOP_BY_LANG.get(lang, set()):
                 continue
-            term = stem_token(term, lang=lang)
+            if self.stemming and lang is not None:
+                term = stem_token(term, lang=lang)
             if term not in self.postings:
                 continue
             idf = self._idf(term)
@@ -299,8 +305,10 @@ class BM25Index:
             "postings": {t: pairs for t, pairs in self.postings.items()},
             "buildId": build_id or self.build_id,
             "corpus_lang": getattr(self, "corpus_lang", "pt"),
+            "stemming": self.stemming,
+            "stemmer_version": self.stemmer_version,
         }
-        self.build_id = payload["buildId"]
+        self.build_id = str(payload["buildId"])
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f)
@@ -323,5 +331,7 @@ class BM25Index:
         del raw_postings
         self.build_id = payload.get("buildId", "") or ""
         self.corpus_lang = payload.get("corpus_lang", "pt")
+        self.stemming = bool(payload.get("stemming", False))
+        self.stemmer_version = payload.get("stemmer_version", "disabled")
         del payload
         return True

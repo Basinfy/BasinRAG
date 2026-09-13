@@ -28,23 +28,31 @@ def hit_rate_at_k(retrieved_ids: List[str], relevant_ids: Set[str], k: int = 10)
             return 1.0
     return 0.0
 
+def recall_at_k(retrieved_ids: List[str], relevant_ids: Set[str], k: int = 10) -> float:
+    if not relevant_ids:
+        return 0.0
+    return len(set(retrieved_ids[:k]) & relevant_ids) / len(relevant_ids)
+
 def evaluate_retrieval(qrels: Dict[str, Set[str]], results: Dict[str, List[str]], k: int = 10) -> Dict[str, float]:
     total = len(qrels)
     if total == 0:
-        return {"mrr": 0.0, "ndcg": 0.0, "hit_rate": 0.0}
+        return {"mrr": 0.0, "ndcg": 0.0, "hit_rate": 0.0, "recall": 0.0}
         
     mrr_sum = 0.0
     ndcg_sum = 0.0
     hit_sum = 0.0
+    recall_sum = 0.0
     
     for qid, rel_ids in qrels.items():
         retrieved = results.get(qid, [])
         mrr_sum += mrr_at_k(retrieved, rel_ids, k)
         ndcg_sum += ndcg_at_k(retrieved, rel_ids, k)
         hit_sum += hit_rate_at_k(retrieved, rel_ids, k)
+        recall_sum += recall_at_k(retrieved, rel_ids, k)
         
     return {
         "mrr": mrr_sum / total,
         "ndcg": ndcg_sum / total,
-        "hit_rate": hit_sum / total
+        "hit_rate": hit_sum / total,
+        "recall": recall_sum / total,
     }

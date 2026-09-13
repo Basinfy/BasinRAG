@@ -1,6 +1,7 @@
 from typing import Optional
 import numpy as np
 import re
+from ..contracts import SearchType
 
 
 class IntelligentQueryRouter:
@@ -104,7 +105,7 @@ class IntelligentQueryRouter:
         return bool(re.search(rf"\b{re.escape(w)}\b", q))
 
     @classmethod
-    def route(cls, query: str) -> str:
+    def route(cls, query: str) -> SearchType:
         q = query.lower().strip()
         q_bare = q.strip("?.! ")
         tokens = q.split()
@@ -148,15 +149,19 @@ class IntelligentQueryRouter:
         ]
         return "global" if len(content) <= 3 else "hybrid"
 
-    _encoder = None
-    _global_centroid: Optional[np.ndarray] = None
-    _hybrid_centroid: Optional[np.ndarray] = None
-    _local_centroid: Optional[np.ndarray] = None
+    def __init__(self, encoder=None, *, query_prompt: str = ""):
+        self.encoder = encoder
+        self.query_prompt = query_prompt
+        self._global_centroid: Optional[np.ndarray] = None
+        self._hybrid_centroid: Optional[np.ndarray] = None
+        self._local_centroid: Optional[np.ndarray] = None
+        if encoder is not None:
+            self.train_centroids()
 
-    @classmethod
-    def train_centroids(cls, encoder):
-        """Train centroids with representative examples across 10 languages (call once at startup)."""
-        cls._encoder = encoder
+    def train_centroids(self):
+        """Train this router's centroids; routers never share encoder state."""
+        if self.encoder is None:
+            return
         global_examples = [
             # PT / EN
             "qual é o tema principal", "visão geral do documento",
@@ -186,30 +191,53 @@ class IntelligentQueryRouter:
             "in this section what does it say about", "passage about the method nearby",
             "ao redor desta menção qual é o argumento", "local context of this claim",
         ]
-        g_embs = encoder.encode(global_examples, normalize_embeddings=True)
-        h_embs = encoder.encode(hybrid_examples, normalize_embeddings=True)
-        l_embs = encoder.encode(local_examples, normalize_embeddings=True)
-        cls._global_centroid = np.mean(g_embs, axis=0)
-        cls._global_centroid /= np.linalg.norm(cls._global_centroid) + 1e-10
-        cls._hybrid_centroid = np.mean(h_embs, axis=0)
-        cls._hybrid_centroid /= np.linalg.norm(cls._hybrid_centroid) + 1e-10
-        cls._local_centroid = np.mean(l_embs, axis=0)
-        cls._local_centroid /= np.linalg.norm(cls._local_centroid) + 1e-10
+        def encode_examples(examples):
+            prompts = [f"{self.query_prompt}{item}" if self.query_prompt else item for item in examples]
+            try:
+                encoded = self.encoder.encode(prompts, normalize_embeddings=True)
+            except TypeError:
+                encoded = self.encoder.encode(prompts)
+            encoded = np.asarray(encoded, dtype=np.float32)
+            if encoded.ndim != 2 or encoded.shape[0] != len(prompts):
+                raise ValueError("Encoder does not support batched router examples")
+            return encoded
 
-    @classmethod
-    def route_with_embeddings(cls, query: str) -> str:
+        try:
+            g_embs = encode_examples(global_examples)
+            h_embs = encode_examples(hybrid_examples)
+            l_embs = encode_examples(local_examples)
+        except (TypeError, ValueError):
+            return
+        self._global_centroid = np.mean(g_embs, axis=0)
+        self._global_centroid /= np.linalg.norm(self._global_centroid) + 1e-10
+        self._hybrid_centroid = np.mean(h_embs, axis=0)
+        self._hybrid_centroid /= np.linalg.norm(self._hybrid_centroid) + 1e-10
+        self._local_centroid = np.mean(l_embs, axis=0)
+        self._local_centroid /= np.linalg.norm(self._local_centroid) + 1e-10
+
+    def route_with_embeddings(self, query: str, query_embedding=None) -> SearchType:
         """Regex fast-path; if ambiguous, classify by embedding distance."""
-        regex_result = cls.route(query)
-        if cls._encoder is None or cls._global_centroid is None:
+        regex_result = self.route(query)
+        if (
+            self.encoder is None
+            or self._global_centroid is None
+            or self._hybrid_centroid is None
+            or self._local_centroid is None
+        ):
             return regex_result
         if len(query.split()) < 4:
             return regex_result
         if regex_result in ("global", "local"):
             return regex_result
-        q_emb = cls._encoder.encode(query, normalize_embeddings=True)
-        sim_global = float(np.dot(q_emb, cls._global_centroid))
-        sim_hybrid = float(np.dot(q_emb, cls._hybrid_centroid))
-        sim_local = float(np.dot(q_emb, cls._local_centroid)) if cls._local_centroid is not None else -1.0
+        q_emb = query_embedding
+        if q_emb is None:
+            text = f"{self.query_prompt}{query}" if self.query_prompt else query
+            q_emb = self.encoder.encode(text, normalize_embeddings=True)
+        q_emb = np.asarray(q_emb, dtype=np.float32).reshape(-1)
+        q_emb /= np.linalg.norm(q_emb) + 1e-10
+        sim_global = float(np.dot(q_emb, self._global_centroid))
+        sim_hybrid = float(np.dot(q_emb, self._hybrid_centroid))
+        sim_local = float(np.dot(q_emb, self._local_centroid)) if self._local_centroid is not None else -1.0
         if sim_global > sim_hybrid + 0.05 and sim_global >= sim_local:
             return "global"
         if sim_local > sim_hybrid + 0.05 and sim_local > sim_global:

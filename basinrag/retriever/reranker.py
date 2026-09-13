@@ -1,4 +1,4 @@
-from typing import List, Sequence, Tuple
+from typing import Any, List, Sequence, Tuple
 from ..logging_config import setup_logging
 
 logger = setup_logging()
@@ -7,10 +7,11 @@ logger = setup_logging()
 class CrossEncoderReranker:
     """Cross-encoder reranker (defaults to BAAI/bge-reranker-v2-m3); skip when the model cannot load."""
 
-    def __init__(self, model_name: str = "BAAI/bge-reranker-v2-m3", max_length: int = 512):
+    def __init__(self, model_name: str = "BAAI/bge-reranker-v2-m3", max_length: int = 512, revision: str | None = None):
         self.model_name = model_name
         self.max_length = max_length
-        self._model = None
+        self.revision = revision
+        self._model: Any = None
 
     def _load_model(self):
         if self._model is None:
@@ -23,22 +24,20 @@ class CrossEncoderReranker:
 
             try:
                 from sentence_transformers import CrossEncoder
-                self._model = CrossEncoder(self.model_name, max_length=self.max_length, trust_remote_code=True)
-            except Exception as e:
-                logger.info(f"Aviso: Falha ao carregar o reranker '{self.model_name}' ({e}). Fazendo fallback para ms-marco-MiniLM...")
-                try:
-                    from sentence_transformers import CrossEncoder
-                    self._model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=self.max_length)
-                except Exception:
-                    logger.info("Aviso: CrossEncoder indisponivel. Reranker desativado.")
-                    self._model = "disabled"
+                options = {"max_length": self.max_length, "trust_remote_code": False}
+                if self.revision:
+                    options["revision"] = self.revision
+                self._model = CrossEncoder(self.model_name, **options)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Não foi possível carregar o reranker configurado {self.model_name!r} "
+                    f"na revisão {self.revision or 'não fixada'}. Verifique modelo e dependências: {exc}"
+                ) from exc
 
     def predict_scores(self, query: str, documents: List[str]) -> List[float]:
         if not documents:
             return []
         self._load_model()
-        if self._model == "disabled":
-            return [float(1.0 / (idx + 1)) for idx in range(len(documents))]
         pairs = [[query, doc] for doc in documents]
         scores = self._model.predict(pairs, batch_size=32, show_progress_bar=False)
         return [float(s) for s in scores]

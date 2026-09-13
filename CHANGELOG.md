@@ -7,16 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Docs
-- Protocolo primário de ranking: BEIR-EN-small (SciFact, NFCorpus, FiQA2018, ArguAna, SCIDOCS), média nDCG@10 **0.445**, MTEB `--no-rerank`.
-- Long-doc: evidence/passage n=120, expand Δ +0.006; SWE-bench deixa de ser claim de leaderboard.
+### Breaking changes
+- Identificador de pacote planejado: `1.1.0`. Apesar do número minor solicitado, esta preparação exige migração incompatível: lê somente snapshot v3 e altera a API. Reindexe fontes originais em um destino `.basinrag-v3` novo; mantenha o root antigo intacto para rollback.
+- API moved to `/v2`; authentication uses `Authorization: Bearer`, and query output is structured.
 
-### Eval
-- `qasper_evidence --storage-dir` para não misturar índices; protocolo SWE-bench oficial isolado em `swebench_protocol.py`.
+### Security and persistence
+- Require API keys except explicitly opted-in local development on loopback; validate WebSocket Origin and bound message size, time, connections, and concurrent generations.
+- Publish snapshots only after manifest, checksum, graph, vector, BM25, and SQLite validation. Keep the active engine on failed reads/builds.
+- Make L3 opt-in; remote excerpt egress requires a second explicit opt-in and LLM summaries live in a separate sidecar.
 
-### CONVERT_C
-- Gate (`results/gate/decision.json`): bacias como briefing; ranking híbrido no SciFact.
-- Persistência por ponteiro `current.json` + builds; `ingest` mescla; API default em localhost.
+### Retrieval and evaluation
+- Keep `hybrid_rrf` as default; topology remains experimental. Gate decisions require complete, provenance-compatible SciFact and QASPER runs; partial MTEB runs do not publish official means.
+- Existing benchmark artifacts and papers are historical records, not current release claims. This changelog does not approve quantitative claims.
 
 ## [1.0.4] - 2026-09-09
 

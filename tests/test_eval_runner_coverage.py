@@ -345,6 +345,7 @@ def test_run_gate_dataset_loaders_use_fake_rows(monkeypatch):
     monkeypatch.setattr(run_gate, "_load_official_qasper_v03", lambda: official)
     corpus, queries, qrels = run_gate.load_qasper(None, 1, revision="b" * 40)
     assert run_gate.load_qasper.source == "official_v0.3_json"
+    assert run_gate.load_qasper.dataset_revision == run_gate.QASPER_OFFICIAL_V03_SHA256
     assert queries == {"qid": "Q"}
 
 

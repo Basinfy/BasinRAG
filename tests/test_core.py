@@ -105,10 +105,29 @@ def test_missing_ingest_source_does_not_wipe_index(tmp_path, monkeypatch):
     engine.partition_into_basins()
     store = BasinPersistence(str(tmp_path / "idx"))
     assert store.save_topology(engine)
+    engine.index_metadata = {
+        "format_version": 3,
+        "encoder_model": "unconfigured",
+        "encoder_revision": "a" * 40,
+        "tokenizer": "unconfigured",
+        "tokenizer_revision": "a" * 40,
+        "reranker_revision": "disabled",
+        "chunk_policy_version": 2,
+        "chunking_mode": "adaptive",
+        "chunk_size": 512,
+        "chunk_overlap": 0,
+        "adaptive_threshold_chars": 4000,
+        "ranking_mode": "hybrid_rrf",
+        "sources": {},
+        "source_file_hashes": {},
+        "bm25_stemming": False,
+        "bm25_stemmer_version": "disabled",
+    }
 
     class FakeIngestor:
         def __init__(self, *args, **kwargs):
             self.encoder = None
+            self.model_revision = "a" * 40
 
         def ingest_directory(self, path):
             return []
@@ -128,6 +147,7 @@ def test_missing_ingest_source_does_not_wipe_index(tmp_path, monkeypatch):
 
     rag = BasinRAG(BasinRAGConfig(
         storage_dir=str(tmp_path / "idx"), encoder_model="unconfigured",
+        encoder_revision="a" * 40,
         chunk_overlap=0, use_rerank=False,
     ))
     rag.engine = engine
@@ -761,6 +781,7 @@ def test_snapshot_publication_rebinds_background_summarizer(tmp_path, monkeypatc
     class FakeIngestor:
         encoder = None
         splitter = None
+        model_revision = "a" * 40
 
         def __init__(self, *args, **kwargs):
             pass
@@ -768,13 +789,34 @@ def test_snapshot_publication_rebinds_background_summarizer(tmp_path, monkeypatc
     monkeypatch.setattr("basinrag.factory.BasinIngestor", FakeIngestor)
     from basinrag.factory import BasinRAG, BasinRAGConfig
 
-    rag = BasinRAG(BasinRAGConfig(storage_dir=str(tmp_path / "snapshots")))
+    rag = BasinRAG(BasinRAGConfig(
+        storage_dir=str(tmp_path / "snapshots"),
+        encoder_revision="a" * 40,
+    ))
     old_engine = BasinTopologyEngine(storage_dir=str(tmp_path / "old-engine"))
     old_chunks = [_chunk("old.txt", 0, "conteudo anterior", 0)]
     new_chunks = [_chunk("new.txt", 0, "conteudo atualizado", 1)]
     old_engine.build_graph(old_chunks)
     old_engine.partition_into_basins()
     assert rag.persistence.save_topology(old_engine)
+    old_engine.index_metadata = {
+        "format_version": 3,
+        "encoder_model": rag.config.encoder_model,
+        "encoder_revision": "a" * 40,
+        "tokenizer": rag.config.encoder_model,
+        "tokenizer_revision": "a" * 40,
+        "reranker_revision": "disabled",
+        "chunk_policy_version": 2,
+        "chunking_mode": "adaptive",
+        "chunk_size": rag.config.chunk_size,
+        "chunk_overlap": rag.config.chunk_overlap,
+        "adaptive_threshold_chars": 4000,
+        "ranking_mode": rag.config.ranking_mode,
+        "sources": {},
+        "source_file_hashes": {},
+        "bm25_stemming": False,
+        "bm25_stemmer_version": "disabled",
+    }
 
     try:
         rag._publish_snapshot(new_chunks, old_engine, replace_sources={"old.txt"})
@@ -890,6 +932,19 @@ def test_index_metadata_rejects_missing_or_unsupported_contracts(metadata):
 
     with pytest.raises(ValueError):
         BasinPersistence._validate_index_metadata(metadata)
+
+
+def test_index_metadata_accepts_adaptive_policy():
+    from basinrag.core.persistence import BasinPersistence
+
+    metadata = _valid_v3_index_metadata()
+    metadata.update(
+        chunking_mode="adaptive",
+        chunk_policy_version=2,
+        adaptive_threshold_chars=4000,
+        leaf_policy="adaptive",
+    )
+    BasinPersistence._validate_index_metadata(metadata)
 
 
 def test_index_metadata_accepts_token_policy_without_character_fields():

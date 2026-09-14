@@ -49,14 +49,7 @@ class HybridSearch:
     def __init__(self, engine: BasinTopologyEngine, local_search: TopologicalLocalSearch):
         self.engine = engine
         self.local_search = local_search
-        bm25: Optional[BM25Index] = engine.bm25
-        if bm25 is None:
-            bm25 = BM25Index()
-            self._bm25 = bm25
-            self._rebuild_bm25()
-            engine.bm25 = bm25
-        else:
-            self._bm25 = bm25
+        self._bm25: Optional[BM25Index] = getattr(engine, "bm25", None)
 
     def _rebuild_bm25(self):
         if self._bm25 is None:
@@ -158,7 +151,7 @@ class HybridSearch:
         top_k: int = 5,
         use_hop_prior: bool = False,
         use_multi_signal_drf: bool = False,
-        use_confidence_gate: bool = True,
+        use_confidence_gate: bool = False,
         candidate_k: Optional[int] = None,
         hop_missing: str = DEFAULT_HOP_MISSING,
         expand_graph: bool = False,

@@ -11,7 +11,9 @@ $run = "results/runs/gate-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 python -m basinrag.eval.run_gate --output $run --skip-rerank
 ```
 
-- SciFact é o controle **flat** (1 doc = 1 nó). QASPER é o long-doc oficial (tarball v0.3, não script Hugging Face).
+- SciFact é o controle **flat** (1 doc = 1 nó). QASPER é o long-doc oficial (tarball v0.3; `dataset_revision` é o SHA-256 do tarball quando `qasper_source=official_v0.3_json`).
+- Gate e produto compartilham o mesmo pool (`candidate_k` via `resolve_candidate_k`) e a mesma regra de CE (skip em índice flat).
+- `qasper_complete` exige os mesmos controlos que SciFact: `hybrid_min`, `hybrid_min_topo` e `encoder_pure` no conjunto completo de queries.
 - `--skip-rerank` é o caminho de produto. Cross-encoder no gate é ablação (`hybrid_min_rerank`), não o default.
 - ArXiv long-doc é experimento separado e **não** substitui QASPER.
 - Cada run usa diretório novo. Não mescle JSONs de commits diferentes.

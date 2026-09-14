@@ -17,6 +17,10 @@ _PDF_EXTS = {".pdf"}
 _SKIP_DIRS = {".git", ".basinrag", "__pycache__", "node_modules", ".venv", "venv"}
 # LlamaIndex sentence-window: retrieve 1–2 sentences, hydrate ±3 at brief time.
 SENTENCE_WINDOW_RADIUS = 3
+ADAPTIVE_THRESHOLD_CHARS = 4000
+LONGDOC_LEAF_SIZE = 256
+LONGDOC_LEAF_OVERLAP = 32
+CHUNK_POLICY_VERSION = 2
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n{2,}")
 
 
@@ -101,6 +105,35 @@ def split_sentence_leaves(
         if not leaves or leaves[-1] != leaf:
             leaves.append(leaf)
     return leaves
+
+
+def split_document_chunks(
+    text: str,
+    *,
+    splitter=None,
+    threshold_chars: int = ADAPTIVE_THRESHOLD_CHARS,
+    long_size: int = LONGDOC_LEAF_SIZE,
+    long_overlap: int = LONGDOC_LEAF_OVERLAP,
+    force_policy: Optional[str] = None,
+) -> tuple:
+    """Choose leaf policy per document. Short → configured splitter; long → sentence-window."""
+    text = text or ""
+    use_sentence = force_policy == "sentence_window" or (
+        force_policy != "legacy_char" and len(text) > int(threshold_chars)
+    )
+    if use_sentence:
+        leaves = [
+            chunk for chunk in split_sentence_leaves(text, long_size, long_overlap) if chunk.strip()
+        ]
+        return leaves, "sentence_window"
+    if splitter is None:
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=512,
+            chunk_overlap=128,
+            separators=["\n\n", "\n", ". ", "? ", "! ", "; ", " ", ""],
+        )
+    chunks = [chunk for chunk in splitter.split_text(text) if chunk and str(chunk).strip()]
+    return chunks, "legacy_char"
 
 
 def _legacy_chunk_length(text: str) -> int:
@@ -421,11 +454,11 @@ class BasinIngestor:
                 meta = dict((metadata_list[i] if metadata_list else {}) or {})
                 meta["doc_id"] = meta.get("doc_id") or source
                 meta["role"] = "child"
-                # Sentence-window parent: retrieve the leaf, hydrate ±3 at brief time.
-                meta["parent_span"] = [
-                    max(0, i - SENTENCE_WINDOW_RADIUS),
-                    min(n - 1, i + SENTENCE_WINDOW_RADIUS),
-                ]
+                if meta.get("leaf_policy") == "sentence_window":
+                    meta["parent_span"] = [
+                        max(0, i - SENTENCE_WINDOW_RADIUS),
+                        min(n - 1, i + SENTENCE_WINDOW_RADIUS),
+                    ]
                 meta["parent_doc"] = source
                 nodes.append({
                     "id": make_node_id(source, i, txt),
@@ -498,10 +531,21 @@ class BasinIngestor:
 
         texts = []
         metadata_list = []
+        if ext in _PDF_EXTS:
+            combined = "\n\n".join(raw_text for raw_text, _ in docs)
+            if len(combined) > ADAPTIVE_THRESHOLD_CHARS:
+                chunks, policy = split_document_chunks(combined, splitter=self.splitter)
+                for chunk in chunks:
+                    texts.append(chunk)
+                    metadata_list.append({"leaf_policy": policy})
+                return texts, metadata_list
         for raw_text, doc_meta in docs:
-            for chunk in self.splitter.split_text(raw_text):
+            chunks, policy = split_document_chunks(raw_text, splitter=self.splitter)
+            for chunk in chunks:
                 texts.append(chunk)
-                metadata_list.append(dict(doc_meta))
+                meta = dict(doc_meta)
+                meta["leaf_policy"] = policy
+                metadata_list.append(meta)
         return texts, metadata_list
 
     def load_text(self, filepath: str) -> List[str]:
@@ -548,11 +592,12 @@ class BasinIngestor:
             for document_text in documents:
                 if not document_text or not str(document_text).strip():
                     continue
-                chunks = self.splitter.split_text(str(document_text))
+                chunks, policy = split_document_chunks(str(document_text), splitter=self.splitter)
                 source = json_doc_source(filepath, doc_index)
                 metadata = {
                     "question": item.get("question", ""),
                     "answer": item.get("answer", ""),
+                    "leaf_policy": policy,
                 }
                 metadata_list = [dict(metadata) for _ in chunks]
                 yield from self._nodes_from_texts(chunks, source, metadata_list)

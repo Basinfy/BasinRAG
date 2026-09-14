@@ -192,10 +192,13 @@ def test_experimental_route_preserves_topological_override_but_not_its_confidenc
 
     packet = retriever.brief("a representative question", top_k=2)
 
-    assert packet.node_ids[0] == "topology-c"
-    assert packet.confidence == pytest.approx(0.25)
+    assert hybrid.calls[0]["use_hop_prior"] is True
+    assert hybrid.calls[0]["use_multi_signal_drf"] is True
+    assert hybrid.calls[0]["expand_graph"] is True
+    assert packet.node_ids[:2] == ["seed-a", "seed-b"]
+    assert packet.confidence == pytest.approx(0.8)
     assert packet.confidence != 1000.0
-    assert hybrid.calls == []
+    assert "topology-c" in packet.node_ids
 
 
 def test_experimental_hybrid_mode_keeps_explicit_topology_signals(monkeypatch):

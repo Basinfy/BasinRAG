@@ -118,17 +118,21 @@ def _auth_valid(
     authorization: str | None,
     origin: str | None = None,
     cookie_token: str | None = None,
+    *,
+    allow_cookie: bool = True,
 ) -> bool:
     if origin is not None and origin.rstrip("/") not in ALLOWED_ORIGINS:
         return False
     token = _token_from_authorization(authorization)
     if API_KEY:
-        token = token or cookie_token
+        token = token or (cookie_token if allow_cookie else None)
         if not token or not secrets.compare_digest(token.encode(), API_KEY.encode()):
             return False
         # Browser WebSockets cannot set Authorization headers. A session cookie
         # is accepted only for an explicitly allowed same-origin request.
-        return authorization is not None or (origin is not None and origin.rstrip("/") in ALLOWED_ORIGINS)
+        return authorization is not None or (
+            allow_cookie and origin is not None and origin.rstrip("/") in ALLOWED_ORIGINS
+        )
     return _local_keyless_enabled() and _is_loopback_host(client_host)
 
 
@@ -308,7 +312,8 @@ async def verify_api_key(request: Request, authorization: str | None = Header(de
         request.client.host if request.client else None,
         authorization,
         origin,
-        request.cookies.get("basinrag_session"),
+        None,
+        allow_cookie=False,
     ):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -320,8 +325,8 @@ def livez():
 
 @app.get("/readyz")
 def readyz():
-    rag = _get_rag()
-    return {"status": "ready", "build_id": rag.engine.build_id}
+    _get_rag()
+    return {"status": "ready"}
 
 
 @app.post("/query", response_model=QueryResponse, dependencies=[Depends(verify_api_key)])
@@ -363,8 +368,7 @@ async def websocket_chat(websocket: WebSocket):
     if _ws_active_connections >= WS_MAX_CONNECTIONS or not _ws_rate_allowed(client, "connections"):
         await websocket.close(code=1008, reason="Rate limited")
         return
-    rag = _rag_instance
-    if rag is None or not rag._loaded:
+    if _rag_instance is None or not _rag_instance._loaded:
         await websocket.close(code=1013, reason="Index not ready")
         return
     await websocket.accept()
@@ -390,17 +394,19 @@ async def websocket_chat(websocket: WebSocket):
             assert _ws_generation_limit is not None
             async with _ws_generation_limit:
                 async with asyncio.timeout(WS_GENERATION_TIMEOUT_SECONDS):
-                    packet = await rag.abrief(
+                    live = _get_rag()
+                    packet = await live.abrief(
                         request_data.query,
                         search_type=request_data.search_type,
                         top_k=request_data.top_k,
                     )
+                    live = _get_rag()
                     refs = []
                     allowed_refs = set()
                     for index, ref_id in enumerate(packet.node_ids):
-                        if ref_id not in rag.engine.graph:
+                        if ref_id not in live.engine.graph:
                             continue
-                        node = rag.engine.graph.nodes[ref_id]
+                        node = live.engine.graph.nodes[ref_id]
                         metadata = node.get("metadata") or {}
                         source = str(node.get("source") or "")
                         allowed_refs.add(str(ref_id))
@@ -414,7 +420,7 @@ async def websocket_chat(websocket: WebSocket):
                         "type": "references", "request_id": request_id, "references": refs
                     })
                     answer = []
-                    async for token in rag.answer_stream(packet, request_data.query):
+                    async for token in live.answer_stream(packet, request_data.query):
                         answer.append(token)
                     answer_text = "".join(answer)
                     cited = set(re.findall(r"\[ref:([^\]]+)\]", answer_text))

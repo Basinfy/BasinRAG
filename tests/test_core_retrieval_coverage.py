@@ -447,7 +447,7 @@ def test_hybrid_dense_fallback_gate_and_graph_expansion():
     assert [row["id"] for row in dense] == [chunks[0]["id"], chunks[1]["id"]]
     assert dense[0]["confidence"] == pytest.approx(0.9)
     local._faiss_hits = lambda _q, _k: [(chunks[0]["id"], 0.01)]
-    assert hybrid.search_nodes("alpha", np.asarray([1, 0]), top_k=2) == []
+    assert hybrid.search_nodes("alpha", np.asarray([1, 0]), top_k=2, use_confidence_gate=True) == []
 
     hybrid._bm25 = type(
         "BM25Stub",

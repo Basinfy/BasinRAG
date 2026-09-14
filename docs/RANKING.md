@@ -9,7 +9,7 @@ O ranking padrão é **`hybrid_rrf`**: BM25 + FAISS fundidos por RRF. Bacias **p
 | Modo | Quando usar |
 |---|---|
 | `hybrid_rrf` (padrão) | Produção e gate. Topologia não muda a ordem das sementes. |
-| `experimental_topology` | Opt-in. Hop/DRF no ranking. Só após ablação no mesmo pool de candidatos. |
+| `experimental_topology` | Opt-in. Hop/DRF/expand no pool RRF. Só após ablação no mesmo pool de candidatos. Nunca substitui as sementes por topologia local/global. |
 
 `BASINRAG_RANKING_MODE` / `ranking_mode` selecionam o modo. `experimental_topology` não é o default.
 
@@ -27,7 +27,9 @@ O retriever escolhe constantes a partir da geometria do índice (`index_is_flat`
 | Cross-encoder | Sempre ignorado | Só se `use_rerank=True` |
 | Bacias no briefing | 1:1; não acrescentam contexto | Irmãos ρ hidratados após as sementes RRF |
 
-Ingestão de produto continua com splitter legado **512 / 128** caracteres. O gate long-doc usa folhas menores (padrão do runner: 256 / 32) via `split_sentence_leaves`.
+Ingestão de produto é **adaptativa** (`chunk_policy_version=2`): documentos curtos (`len <= 4000` caracteres) usam o splitter legado **512 / 128**; documentos longos usam as mesmas folhas sentence-window **256 / 32** que o gate QASPER (`split_document_chunks` / `split_sentence_leaves`). Reindex é obrigatório para fontes longas já indexadas na política v1.
+
+O gate usa o mesmo kernel de pool: `top_k` é o corte de saída e `candidate_k` vem de `HybridSearch.resolve_candidate_k`. Cross-encoder no gate também é ignorado em índices flat.
 
 ## Cross-encoder
 

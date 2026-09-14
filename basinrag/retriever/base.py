@@ -114,108 +114,51 @@ class BasinRAGRetriever(BaseRetriever):
 
         packet = BriefingPacket()
         context_nodes: List[dict[str, Any]] = []
+        experimental = self.ranking_mode == "experimental_topology"
+        # Seeds are always hybrid RRF. experimental_topology only ORs hop/DRF/expand
+        # on that pool; local/global never replace the seed list.
+        nodes = self._hybrid.search_nodes(
+            query,
+            query_emb,
+            top_k=max(k * 2, 20),
+            use_confidence_gate=False,
+            use_hop_prior=experimental,
+            use_multi_signal_drf=experimental,
+            expand_graph=experimental,
+        )
+        if not nodes:
+            return packet
+        self._fill_from_nodes(
+            packet,
+            nodes,
+            confidence=self._dense_confidence(query_emb, [item["id"] for item in nodes]),
+        )
+        seed_count = len(packet.node_ids)
 
-        if self.ranking_mode != "experimental_topology":
-            # Keep BM25 + FAISS RRF as the seed ranker for every route. The
-            # local/global choice only controls briefing expansion below.
-            nodes = self._hybrid.search_nodes(
-                query,
-                query_emb,
-                top_k=max(k * 2, 20),
-                use_confidence_gate=False,
-                use_hop_prior=False,
-                use_multi_signal_drf=False,
-                expand_graph=False,
-            )
-            if not nodes:
-                return packet
-            self._fill_from_nodes(
-                packet,
-                nodes,
-                confidence=self._dense_confidence(query_emb, [item["id"] for item in nodes]),
-            )
-            seed_count = len(packet.node_ids)
-
-            if strategy == "local":
-                # PPR/hops can contribute context, but never replace or
-                # reorder the RRF-ranked seed passages.
-                context_nodes = self._local.search_nodes(query_emb, top_k=max(k, 1))
-            elif strategy == "global":
-                parts = self._global_search(query, k, query_emb)
-                for part in parts:
-                    l3 = cap_satellite(part.get("l3") or "")
-                    if l3 and l3 not in packet.satellites:
-                        packet.satellites.append(l3)
-                    for nid, text in zip(part.get("node_ids") or [], part.get("hubs") or []):
-                        context_nodes.append({"id": nid, "text": text})
-
-            context_nodes.extend(self._basin_context_nodes(packet.node_ids[:seed_count], max(k, 1)))
-            seen = set(packet.node_ids)
-            for item in context_nodes:
-                nid = item.get("id")
-                if not nid or nid in seen or nid not in self.engine.graph:
-                    continue
-                seen.add(nid)
-                packet.node_ids.append(nid)
-                packet.neighbors.append(
-                    self._parent_context_text(nid, item.get("text") or self.engine.graph.nodes[nid].get("text", ""))
-                )
+        if strategy == "local":
+            # PPR/hops can contribute context, but never replace or
+            # reorder the RRF-ranked seed passages.
+            context_nodes = self._local.search_nodes(query_emb, top_k=max(k, 1))
         elif strategy == "global":
             parts = self._global_search(query, k, query_emb)
-            if not parts:
-                return packet
-            global_node_ids: List[str] = []
             for part in parts:
                 l3 = cap_satellite(part.get("l3") or "")
-                if l3:
+                if l3 and l3 not in packet.satellites:
                     packet.satellites.append(l3)
-                packet.hubs.extend(part.get("hubs") or [])
-                packet.neighbors.extend(part.get("neighbors") or [])
-                node_ids = part.get("node_ids") or []
-                packet.node_ids.extend(node_ids)
-                global_node_ids.extend(node_ids)
-            packet.confidence = self._dense_confidence(query_emb, global_node_ids)
-            seed_count = len(packet.node_ids)
-        elif strategy == "local":
-            nodes = self._local.search_nodes(query_emb, top_k=max(k * 2, 20))
-            if not nodes:
-                # Explicit experimental mode retains the existing hybrid
-                # fallback, including its opt-in topological signals.
-                nodes = self._hybrid.search_nodes(
-                    query,
-                    query_emb,
-                    top_k=max(k * 2, 20),
-                    use_confidence_gate=False,
-                    use_hop_prior=True,
-                    use_multi_signal_drf=True,
-                    expand_graph=True,
-                )
-            if not nodes:
-                return packet
-            self._fill_from_nodes(
-                packet,
-                nodes,
-                confidence=self._dense_confidence(query_emb, [item["id"] for item in nodes]),
+                for nid, text in zip(part.get("node_ids") or [], part.get("hubs") or []):
+                    context_nodes.append({"id": nid, "text": text})
+
+        context_nodes.extend(self._basin_context_nodes(packet.node_ids[:seed_count], max(k, 1)))
+        seen = set(packet.node_ids)
+        for item in context_nodes:
+            nid = item.get("id")
+            if not nid or nid in seen or nid not in self.engine.graph:
+                continue
+            seen.add(nid)
+            packet.node_ids.append(nid)
+            packet.neighbors.append(
+                self._parent_context_text(nid, item.get("text") or self.engine.graph.nodes[nid].get("text", ""))
             )
-            seed_count = len(packet.node_ids)
-        else:
-            nodes = self._hybrid.search_nodes(
-                query,
-                query_emb,
-                top_k=k * 2,
-                use_confidence_gate=False,
-                use_hop_prior=True,
-                use_multi_signal_drf=True,
-                expand_graph=True,
-            )
-            if not nodes:
-                return packet
-            self._fill_from_nodes(
-                packet,
-                nodes,
-                confidence=self._dense_confidence(query_emb, [item["id"] for item in nodes]),
-            )
-            seed_count = len(packet.node_ids)
 
         # Only the seed list enters ranking/reranking. Route-specific topology
         # remains briefing context appended after those seed passages.

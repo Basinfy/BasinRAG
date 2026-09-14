@@ -114,7 +114,7 @@ def test_liveness_and_readiness_are_separate(client):
     assert client.get("/v2/livez").status_code == 404
     response = client.get("/readyz")
     assert response.status_code == 200
-    assert response.json() == {"status": "ready", "build_id": "build-001"}
+    assert response.json() == {"status": "ready"}
 
 
 def test_query_returns_structured_source_without_absolute_path(client):
@@ -276,6 +276,9 @@ def test_bearer_cookie_and_origin_authentication_rules(monkeypatch):
     assert server._auth_valid("192.0.2.1", "Bearer secret")
     assert not server._auth_valid("192.0.2.1", "Bearer wrong")
     assert server._auth_valid("192.0.2.1", None, allowed_origin, "secret")
+    assert not server._auth_valid(
+        "192.0.2.1", None, allowed_origin, "secret", allow_cookie=False
+    )
     assert not server._auth_valid("192.0.2.1", None, None, "secret")
     assert not server._auth_valid("192.0.2.1", "Bearer secret", "https://evil.example")
     monkeypatch.setattr(server, "API_KEY", None)
@@ -363,6 +366,35 @@ def test_websocket_not_ready_and_binary_frame_close(client, mock_rag, monkeypatc
         with pytest.raises(WebSocketDisconnect) as exc:
             websocket.receive_json()
     assert exc.value.code == 1003
+
+
+def test_websocket_recaptures_snapshot_after_swap(client, mock_rag):
+    from basinrag.api import server
+
+    packet = SimpleNamespace(node_ids=["node-1"], hubs=["evidência"], neighbors=[], satellites=[])
+
+    async def swap_brief(*_args, **_kwargs):
+        mock_rag.engine.graph.nodes.clear()
+        replacement = SimpleNamespace()
+        replacement._loaded = True
+        replacement.config = mock_rag.config
+        graph = type(mock_rag.engine.graph)()
+        graph.add_node("node-1", source="/private/corpus/source.md", metadata={"page": 3})
+        replacement.engine = SimpleNamespace(graph=graph, close_stores=lambda: None)
+
+        async def answer_stream(_packet, _question):
+            yield "Resposta [ref:node-1]"
+
+        replacement.answer_stream = answer_stream
+        server._rag_instance = replacement
+        return packet
+
+    mock_rag.abrief = AsyncMock(side_effect=swap_brief)
+    with client.websocket_connect("/chat") as websocket:
+        websocket.send_json({"query": "pergunta válida"})
+        events = [websocket.receive_json() for _ in range(4)]
+    assert [event["type"] for event in events] == ["start", "references", "token", "done"]
+    assert events[1]["references"][0]["ref_id"] == "node-1"
 
 
 def test_websocket_malformed_message_can_be_followed_by_valid_request(client):
@@ -473,7 +505,7 @@ def test_lifespan_starts_local_background_summarizer(monkeypatch):
         server.BasinRAG, "create", return_value=rag
     ):
         with TestClient(server.app):
-            assert server.readyz()["build_id"] == "l3-build"
+            assert server.readyz()["status"] == "ready"
         rag.start_background_summarizer.assert_awaited_once_with(verbose=True)
     rag.engine.close_stores.assert_called_once()
 

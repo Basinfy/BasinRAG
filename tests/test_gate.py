@@ -192,6 +192,12 @@ def test_provenance_rejects_invalid_contract_fields(field, value):
     assert not _provenance_valid(provenance, dataset="SciFact", split="test")
 
 
+def test_provenance_accepts_tarball_sha256():
+    provenance = _provenance("QASPER", "validation")
+    provenance["dataset_revision"] = "a" * 64
+    assert _provenance_valid(provenance, dataset="QASPER", split="validation")
+
+
 def test_provenance_accepts_numeric_counts_and_shared_protocol_is_exact():
     provenance = _provenance("SciFact", "test")
     provenance["n_queries"] = "10"
@@ -419,6 +425,8 @@ def test_gate_searcher_dispatches_all_systems_and_filters_missing_nodes():
     assert searcher.search("q", "bm25_pure", top_k=1) == ["src-a"]
     assert bm25.calls == [("q", 50)]
     assert searcher.search("q", "hybrid_min", top_k=1) == ["doc-a"]
+    assert hybrid.calls[-1][1]["top_k"] == 1
+    assert hybrid.calls[-1][1]["candidate_k"] == 50
     assert searcher.search("q", "hybrid_min_topo", top_k=1) == ["doc-a"]
     assert hybrid.calls[-1][1]["use_hop_prior"] is True
     assert hybrid.calls[-1][1]["expand_graph"] is False

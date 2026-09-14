@@ -1,3 +1,4 @@
+import logging
 import sys
 
 # Patch PyTorch DTensor para compatibilidade do SentenceTransformers/Transformers no PyTorch 2.4
@@ -5,7 +6,7 @@ try:
     import torch.distributed._tensor as _t
     sys.modules.setdefault("torch.distributed.tensor", _t)
 except Exception:
-    pass
+    logging.getLogger(__name__).exception("Falha ao aplicar shim DTensor")
 
 from typing import Any, Dict, Optional, cast
 

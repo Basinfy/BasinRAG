@@ -1,10 +1,12 @@
 import asyncio
 import hashlib
+import json
 import os
-import pickle
 import shutil
 import tempfile
 import threading
+
+import numpy as np
 from dataclasses import dataclass
 from typing import Any, Optional
 from .model_revisions import default_huggingface_revision, resolve_huggingface_revision
@@ -15,7 +17,13 @@ logger = setup_logging()
 from .core.topology import BasinTopologyEngine
 from .core.persistence import BasinPersistence
 from .core.llm import UniversalLLM
-from .indexer.ingestor import BasinIngestor
+from .indexer.ingestor import (
+    ADAPTIVE_THRESHOLD_CHARS,
+    CHUNK_POLICY_VERSION,
+    LONGDOC_LEAF_OVERLAP,
+    LONGDOC_LEAF_SIZE,
+    BasinIngestor,
+)
 from .indexer.summarizer import BasinSummarizer
 from .indexer.bm25 import BM25Index, current_stemmer_version
 from .retriever.base import BasinRAGRetriever
@@ -276,9 +284,15 @@ class BasinRAG:
                 f"O snapshot usa o encoder {stored_encoder}, mas a configuração usa "
                 f"{self.config.encoder_model}; execute `basinrag reindex <diretorio-do-corpus>`."
             )
+        unresolved = {None, "", "unresolved", "unknown"}
         stored_revision = metadata.get("encoder_revision")
+        if stored_revision in unresolved:
+            raise ValueError(
+                "A revisão do encoder está ausente ou unresolved; execute reindex "
+                "em um destino novo."
+            )
         actual_revision = self.config.encoder_revision or getattr(self.ingestor, "model_revision", None)
-        if stored_revision not in (None, "unresolved") and actual_revision != stored_revision:
+        if actual_revision not in unresolved and actual_revision != stored_revision:
             raise ValueError(
                 "A revisão do encoder difere do manifesto do snapshot; execute reindex "
                 "em um destino novo."
@@ -291,12 +305,28 @@ class BasinRAG:
                 "O tokenizer configurado difere do manifesto do índice; execute "
                 "`basinrag reindex <diretorio-do-corpus>`."
             )
-        if int(metadata.get("chunk_policy_version", 0)) != 1:
+        stored_tok_rev = metadata.get("tokenizer_revision")
+        if stored_tok_rev in unresolved:
+            raise ValueError(
+                "A revisão do tokenizer está ausente ou unresolved; execute reindex "
+                "em um destino novo."
+            )
+        if actual_revision not in unresolved and stored_tok_rev != actual_revision:
+            raise ValueError(
+                "A revisão do tokenizer difere do manifesto; execute reindex em um destino novo."
+            )
+        stored_ranking = metadata.get("ranking_mode") or "hybrid_rrf"
+        if stored_ranking != self.config.ranking_mode:
+            raise ValueError(
+                "O ranking_mode do snapshot difere da configuração; execute reindex "
+                "em um destino novo."
+            )
+        if int(metadata.get("chunk_policy_version", 0)) != CHUNK_POLICY_VERSION:
             raise ValueError("A versão da política de chunking mudou; execute reindex.")
         stored_mode = metadata.get("chunking_mode")
         if stored_mode is None:
             stored_mode = "tokens" if metadata.get("chunk_size_tokens") is not None else "characters"
-        current_mode = "tokens" if self.config.chunk_size_tokens is not None else "characters"
+        current_mode = "tokens" if self.config.chunk_size_tokens is not None else "adaptive"
         if stored_mode != current_mode:
             raise ValueError("O modo de chunking mudou; execute reindex antes de ingerir fontes.")
 
@@ -310,6 +340,8 @@ class BasinRAG:
             matches = (
                 metadata.get("chunk_size") == self.config.chunk_size
                 and metadata.get("chunk_overlap") == self.config.chunk_overlap
+                and int(metadata.get("adaptive_threshold_chars") or ADAPTIVE_THRESHOLD_CHARS)
+                == ADAPTIVE_THRESHOLD_CHARS
             )
         if not matches:
             raise ValueError(
@@ -405,14 +437,36 @@ class BasinRAG:
             yield from self.ingestor.ingest(path)
 
     @staticmethod
+    def _json_default(obj):
+        if isinstance(obj, np.ndarray):
+            return obj.astype(np.float32).tolist()
+        if isinstance(obj, np.generic):
+            return obj.item()
+        raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+    @staticmethod
+    def _spool_node_payload(node):
+        payload = dict(node)
+        embedding = payload.get("embedding")
+        if embedding is not None:
+            payload["embedding"] = np.asarray(embedding, dtype=np.float32).tolist()
+        return payload
+
+    @staticmethod
     def _spool_nodes(nodes):
-        """Spool a corpus iterator to disk so only one source/batch stays in memory."""
+        """Spool a corpus iterator as NDJSON so embeddings stay out of pickle."""
         spool = tempfile.TemporaryFile(mode="w+b")
         count = 0
         sources = set()
         try:
             for node in nodes:
-                pickle.dump(node, spool, protocol=pickle.HIGHEST_PROTOCOL)
+                line = json.dumps(
+                    BasinRAG._spool_node_payload(node),
+                    ensure_ascii=False,
+                    default=BasinRAG._json_default,
+                )
+                spool.write(line.encode("utf-8"))
+                spool.write(b"\n")
                 count += 1
                 if node.get("source"):
                     sources.add(node["source"])
@@ -426,11 +480,15 @@ class BasinRAG:
     @staticmethod
     def _iter_spooled_nodes(spool):
         spool.seek(0)
-        while True:
-            try:
-                yield pickle.load(spool)
-            except EOFError:
-                return
+        for raw in spool:
+            line = raw.decode("utf-8").strip()
+            if not line:
+                continue
+            payload = json.loads(line)
+            embedding = payload.get("embedding")
+            if embedding is not None:
+                payload["embedding"] = np.asarray(embedding, dtype=np.float32)
+            yield payload
 
     @staticmethod
     def _iter_chunks_from_engine(engine, excluded_sources=()):
@@ -527,11 +585,17 @@ class BasinRAG:
             candidate.build_id = getattr(old_engine, "build_id", "") or ""
             splitter = getattr(self.ingestor, "splitter", None)
             tokenizer = getattr(splitter, "tokenizer", None)
+            unresolved = {None, "", "unresolved", "unknown"}
             encoder_revision = getattr(self.ingestor, "model_revision", "unresolved")
-            if self.config.encoder_revision or encoder_revision not in {None, "", "unresolved", "unknown"}:
+            if self.config.encoder_revision or encoder_revision not in unresolved:
                 encoder_revision = resolve_huggingface_revision(
                     self.config.encoder_model,
                     self.config.encoder_revision or encoder_revision,
+                )
+            if encoder_revision in unresolved:
+                raise ValueError(
+                    "Recusa publicar snapshot com encoder_revision unresolved; "
+                    "fixe BASINRAG_ENCODER_REVISION ou reconstrua o encoder."
                 )
             old_metadata = getattr(old_engine, "index_metadata", {}) or {}
             old_reranker_revision = old_metadata.get("reranker_revision")
@@ -549,7 +613,10 @@ class BasinRAG:
             elif hasattr(self.ingestor, "model_revision"):
                 reranker_revision = resolve_huggingface_revision(self.config.reranker_model)
             else:
-                reranker_revision = "unresolved"
+                raise ValueError(
+                    "Recusa publicar snapshot com reranker_revision unresolved; "
+                    "fixe BASINRAG_RERANKER_REVISION ou desligue o rerank."
+                )
             candidate.index_metadata = {
                 "format_version": 3,
                 "encoder_model": self.config.encoder_model,
@@ -594,19 +661,27 @@ class BasinRAG:
         if config.chunk_size_tokens is not None:
             return {
                 "chunking_mode": "tokens",
-                "chunk_policy_version": 1,
+                "chunk_policy_version": CHUNK_POLICY_VERSION,
                 "chunk_size": None,
                 "chunk_overlap": None,
                 "chunk_size_tokens": config.chunk_size_tokens,
                 "chunk_overlap_tokens": config.chunk_overlap_tokens or 0,
+                "leaf_policy": "tokens",
+                "adaptive_threshold_chars": ADAPTIVE_THRESHOLD_CHARS,
+                "long_leaf_size": LONGDOC_LEAF_SIZE,
+                "long_leaf_overlap": LONGDOC_LEAF_OVERLAP,
             }
         return {
-            "chunking_mode": "characters",
-            "chunk_policy_version": 1,
+            "chunking_mode": "adaptive",
+            "chunk_policy_version": CHUNK_POLICY_VERSION,
             "chunk_size": config.chunk_size,
             "chunk_overlap": config.chunk_overlap,
             "chunk_size_tokens": None,
             "chunk_overlap_tokens": None,
+            "leaf_policy": "adaptive",
+            "adaptive_threshold_chars": ADAPTIVE_THRESHOLD_CHARS,
+            "long_leaf_size": LONGDOC_LEAF_SIZE,
+            "long_leaf_overlap": LONGDOC_LEAF_OVERLAP,
         }
 
     @staticmethod
@@ -922,12 +997,13 @@ class BasinRAG:
         from langchain_core.documents import Document
         docs = []
         for i, text in enumerate(packet.texts_for_rerank()[: (top_k or retriever.top_k)]):
-            meta = {}
-            if i < len(packet.node_ids):
-                nid = packet.node_ids[i]
-                if nid in engine.graph:
-                    node_data = engine.graph.nodes[nid]
-                    meta = dict(node_data.get("metadata") or {})
+            if i >= len(packet.node_ids):
+                continue
+            nid = packet.node_ids[i]
+            if nid not in engine.graph:
+                continue
+            node_data = engine.graph.nodes[nid]
+            meta = dict(node_data.get("metadata") or {})
             meta["node_id"] = nid
             meta["source"] = node_data.get("source", "")
             meta["source_label"] = os.path.basename(str(meta["source"])) if meta["source"] else None
@@ -985,8 +1061,11 @@ class BasinRAG:
     def validate_query_dependencies(self) -> None:
         if not self._loaded:
             raise RuntimeError("Nenhum snapshot válido foi carregado")
-        retriever, _engine = self._capture_retriever()
-        if self.config.use_rerank and not index_is_flat(self.engine):
+        retriever, engine = self._capture_retriever()
+        bm25 = getattr(engine, "bm25", None)
+        if bm25 is None or int(getattr(bm25, "n", 0) or 0) <= 0:
+            raise RuntimeError("Snapshot sem BM25 persistido; reindexe.")
+        if self.config.use_rerank and not index_is_flat(engine):
             assert retriever._reranker is not None
             retriever._reranker._load_model()
 

@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from .metrics import ndcg_at_k, mrr_at_k, hit_rate_at_k
+from ..retriever.fusion import index_is_flat
+from ..retriever.hybrid_search import HybridSearch
 from ..retriever.prompts import QUERY_PROMPT as _SHARED_QUERY_PROMPT
 
 SYSTEMS = (
@@ -221,7 +223,7 @@ def _provenance_valid(provenance: Optional[Dict[str, Any]], *, dataset: str, spl
         and provenance.get("sampled") is False
         and bool(provenance.get("encoder"))
         and provenance.get("encoder_revision") not in (None, "", "unresolved", "unknown")
-        and len(dataset_revision) == 40
+        and len(dataset_revision) in (40, 64)
         and all(char in "0123456789abcdef" for char in dataset_revision)
         and bool(provenance.get("chunk_policy"))
         and bool(provenance.get("protocol_version"))
@@ -281,7 +283,8 @@ class GateSearcher:
         use_hop = system in ("hybrid_min_topo", "basinrag_full")
         use_rerank = system in ("hybrid_min_rerank", "basinrag_full")
         emb = self.encode(query)
-        candidate_k = max(50, top_k * 5)
+        long_doc = not index_is_flat(self.engine)
+        candidate_k = HybridSearch.resolve_candidate_k(top_k, long_doc=long_doc)
 
         if system == "encoder_pure":
             hits = self.local.dense_hits(emb, top_k=candidate_k)
@@ -300,14 +303,15 @@ class GateSearcher:
             hits = self.hybrid.search_nodes(
                 query,
                 emb,
-                top_k=candidate_k,
+                top_k=top_k,
+                candidate_k=candidate_k,
                 use_hop_prior=use_hop,
                 use_confidence_gate=False,
                 hop_missing="penalty",
                 expand_graph=False,
             )
 
-        if use_rerank and self.reranker and hits:
+        if use_rerank and self.reranker and hits and not index_is_flat(self.engine):
             hits = self._rerank(query, hits, top_k=min(len(hits), max(25, top_k)))
         return collapse_to_docs(self.engine, hits, top_k)
 

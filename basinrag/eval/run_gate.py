@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -11,7 +12,7 @@ try:
     import torch.distributed._tensor as _t
     sys.modules.setdefault("torch.distributed.tensor", _t)
 except Exception:
-    pass
+    logging.getLogger(__name__).exception("Falha ao aplicar shim DTensor")
 
 from ..factory import BasinRAG, BasinRAGConfig
 from ..indexer.condensation import node_layers
@@ -145,12 +146,14 @@ def load_qasper(max_papers: Optional[int], max_queries: Optional[int], revision:
     if not revision:
         raise RuntimeError("Informe um commit imutável em --qasper-revision para validar o gate")
     load_qasper.source = "huggingface"
+    load_qasper.dataset_revision = revision
     try:
         ds = load_dataset("allenai/qasper", split="validation", revision=revision)
     except Exception as first_err:
         try:
             ds = _load_official_qasper_v03()
             load_qasper.source = "official_v0.3_json"
+            load_qasper.dataset_revision = QASPER_OFFICIAL_V03_SHA256
         except Exception as official_err:
             raise RuntimeError(
                 "QASPER validation indisponível; o gate não pode usar fallback "
@@ -271,14 +274,19 @@ def index_flat_docs(rag: BasinRAG, corpus: Dict[str, str], reranker_enabled: boo
 def index_long_docs(rag: BasinRAG, corpus: Dict[str, str], chunk_size: int, chunk_overlap: int, reranker_enabled: bool = False) -> None:
     """Sentence-window leaves under a shared source; SciFact stays in index_flat_docs."""
     from ..core.ids import make_node_id
-    from ..indexer.ingestor import SENTENCE_WINDOW_RADIUS, split_sentence_leaves
+    from ..indexer.ingestor import SENTENCE_WINDOW_RADIUS, split_document_chunks
 
     expected_build_id = rag.persistence.current_build_id()
     nodes: List[Dict[str, Any]] = []
     texts_acc: List[str] = []
     meta_acc: List[Tuple[str, int, str, int]] = []
     for doc_id, text in corpus.items():
-        chunks = [c for c in split_sentence_leaves(text, chunk_size, chunk_overlap) if c.strip()]
+        chunks, _policy = split_document_chunks(
+            text,
+            force_policy="sentence_window",
+            long_size=chunk_size,
+            long_overlap=chunk_overlap,
+        )
         n_chunks = len(chunks)
         for i, chunk in enumerate(chunks):
             texts_acc.append(chunk)
@@ -342,12 +350,14 @@ def _set_gate_manifest(rag: BasinRAG, *, chunk_size: int, chunk_overlap: int, re
             resolve_huggingface_revision(rag.config.reranker_model, rag.config.reranker_revision)
             if reranker_enabled else "disabled"
         ),
-        "chunking_mode": "characters",
-        "chunk_policy_version": 1,
+        "chunking_mode": "adaptive" if chunk_size > 1 else "characters",
+        "chunk_policy_version": 2,
         "chunk_size": chunk_size,
         "chunk_overlap": chunk_overlap,
         "chunk_size_tokens": None,
         "chunk_overlap_tokens": None,
+        "leaf_policy": "sentence_window" if chunk_size > 1 else "flat",
+        "adaptive_threshold_chars": 4000,
         "sources": BasinRAG._source_manifest(source_chunks),
         "source_file_hashes": {},
         "ranking_mode": rag.config.ranking_mode,
@@ -381,6 +391,7 @@ def run_corpus(
     encoder_revision: Optional[str] = None,
     reranker_revision: Optional[str] = None,
     dataset_revision: Optional[str] = None,
+    dataset_source: Optional[str] = None,
     sampled: bool = False,
 ) -> Dict[str, Any]:
     print(f"\n=== GATE {name}: {len(corpus)} docs, {len(queries)} queries, {len(qrels)} qrels ===")
@@ -405,7 +416,6 @@ def run_corpus(
     if not force_reindex:
         loaded = rag.load() and len(rag.engine.graph) > 0
         if loaded:
-            rag._attach_bm25()
             print(f"[gate] loaded index ({len(rag.engine.graph)} nodes) from {storage_dir}")
     if not loaded:
         if long_doc:
@@ -437,6 +447,7 @@ def run_corpus(
             "dataset": "arxiv_longdoc" if name.lower() == "arxiv_longdoc" else name,
             "split": "validation" if name.upper() == "QASPER" else ("validation" if name.lower() == "arxiv_longdoc" else "test"),
             "dataset_revision": dataset_revision,
+            "dataset_source": dataset_source,
             "complete": not sampled,
             "sampled": sampled,
             "encoder": encoder,
@@ -573,7 +584,9 @@ def main():
     else:
         try:
             corpus, queries, qrels = load_qasper(args.max_papers, args.max_long_queries, args.qasper_revision)
-            payload["protocol"]["qasper_source"] = getattr(load_qasper, "source", None)
+            qasper_source = getattr(load_qasper, "source", None)
+            qasper_revision = getattr(load_qasper, "dataset_revision", args.qasper_revision)
+            payload["protocol"]["qasper_source"] = qasper_source
             queries, qrels = _limit_queries(queries, qrels, args.max_long_queries)
             qasper = run_corpus(
                 "QASPER", str(index_root / "qasper"), args.encoder, args.reranker,
@@ -583,18 +596,26 @@ def main():
                 force_reindex=args.force_reindex,
                 encoder_revision=args.encoder_revision,
                 reranker_revision=args.reranker_revision,
-                dataset_revision=args.qasper_revision,
+                dataset_revision=qasper_revision,
+                dataset_source=qasper_source,
                 sampled=sampled,
             )
             payload["qasper"] = {"n_docs": len(corpus), **qasper}
             qasper_metrics = qasper["metrics"]
             qasper_basins = qasper["basins"]
             qasper_provenance = qasper["provenance"]
-            control = qasper_metrics.get("hybrid_min")
+            control_rows = (
+                qasper_metrics.get("hybrid_min"),
+                qasper_metrics.get("hybrid_min_topo"),
+                qasper_metrics.get("encoder_pure"),
+            )
             expected_queries = sum(1 for qid in queries if qrels.get(qid))
-            qasper_complete = bool(
-                not sampled and control and not control.get("skipped")
-                and control.get("n_queries") == expected_queries
+            qasper_complete = (
+                not sampled
+                and all(
+                    row and not row.get("skipped") and row.get("n_queries") == expected_queries
+                    for row in control_rows
+                )
             )
             if not qasper_complete:
                 invalid_reasons.append("QASPER completo ou seu resultado de controle está ausente")

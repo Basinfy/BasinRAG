@@ -158,8 +158,7 @@ def main():
                         bg_task.cancel()
                     break
             
-            # Salva o progresso ao sair
-            rag.persistence.save_topology(rag.engine)
+            # L3 fica no sidecar; o chat não regrava a topologia ao sair.
         
         asyncio.run(chat_loop())
 

@@ -39,7 +39,7 @@ BasinRAG combina BM25 e FAISS por RRF no modo padrão `hybrid_rrf`. Em índices 
 | `allow_remote_l3_egress` | `bool` | `False` | Opt-in adicional para enviar trechos a um LLM remoto para sumarização. |
 | `min_confidence` | `float` | `0.15` | Limiar heurístico de abstenção; não é confiança calibrada. |
 
-As opções legadas `chunk_size` e `chunk_overlap` mantêm a unidade de caracteres da API 1.0.x. Depois dessa divisão, trechos que excedem a capacidade do encoder são subdivididos pelo tokenizer com margem para tokens especiais. Os novos campos de tokens são opcionais e aditivos; não alteram chunks já persistidos. O manifesto registra metadados do encoder e da política de chunking. Se o modelo/tokenizer persistido não for compatível com a configuração atual, reindexe explicitamente.
+As opções legadas `chunk_size` e `chunk_overlap` mantêm a unidade de caracteres da API 1.0.x. A ingestão padrão é adaptativa (`chunking_mode=adaptive`, `chunk_policy_version=2`): documentos curtos usam 512/128; documentos longos (acima de 4000 caracteres) usam folhas sentence-window 256/32, iguais ao gate QASPER. Depois dessa divisão, trechos que excedem a capacidade do encoder são subdivididos pelo tokenizer com margem para tokens especiais. Os novos campos de tokens são opcionais e aditivos; não alteram chunks já persistidos. O manifesto registra metadados do encoder e da política de chunking. Se o modelo/tokenizer persistido não for compatível com a configuração atual, reindexe explicitamente.
 
 ### Variáveis de ambiente
 
@@ -71,11 +71,12 @@ O formato do snapshot é versionado internamente para detectar índices incompat
 
 A aplicação FastAPI é `basinrag.api.server:app`. Inicie pela CLI com `basinrag serve --host 127.0.0.1 --port 8000` ou pelo ASGI com `uvicorn basinrag.api.server:app --host 127.0.0.1 --port 8000`.
 
-- **Autenticação:** somente `Authorization: Bearer <key>`; nunca use credencial em URL. WebSocket browser usa cookie same-origin autenticado, com Origin allowlisted. A chave é obrigatória no startup, salvo modo local explícito e loopback.
+- **Autenticação HTTP:** somente `Authorization: Bearer <key>`; cookies de sessão não autenticam rotas HTTP. Nunca use credencial em URL.
+- **Autenticação WebSocket:** Bearer ou cookie `basinrag_session` same-origin (`SameSite=Lax` ou `Strict`) com Origin na allowlist. A chave é obrigatória no startup, salvo modo local explícito e loopback.
 - **`GET /livez`** — processo ativo, sem depender do snapshot.
-- **`GET /readyz`** — snapshot e dependências de consulta válidos; caso contrário 503.
+- **`GET /readyz`** — `{"status": "ready"}` quando o snapshot carrega; 503 caso contrário. Sem `build_id` (detalhe de índice só autenticado).
 - **`POST /query`** — corpo JSON com `query`, `search_type` (`auto|local|global|hybrid`) e `top_k` (1–50). Resultados incluem ref, texto, fonte, página, posição e papel, sem caminho absoluto. Sem snapshot válido, responde 503.
-- **`WS /chat`** — mensagens JSON limitadas; eventos incluem request id, tokens, referências, erro e conclusão. Citações são validadas contra referências recuperadas; geração é cancelada ao desconectar.
+- **`WS /chat`** — cada mensagem recaptura o snapshot ativo (swap atômico não deixa a conexão presa ao índice antigo). Mensagens JSON limitadas; eventos incluem request id, tokens, referências, erro e conclusão. Citações são validadas contra referências recuperadas; geração é cancelada ao desconectar.
 - **Limites:** corpo WS 8 KiB, até 64 conexões, 8 gerações simultâneas e timeout de 120 s. Configure `BASINRAG_TRUSTED_PROXIES` somente para IP encaminhado; isso nunca autentica.
 - **CORS/Origin:** allowlist explícita; wildcard não é aceito. Origem WebSocket também é validada.
 

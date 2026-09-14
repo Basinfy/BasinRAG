@@ -113,7 +113,7 @@ def test_cli_query_requires_loaded_index_and_prints_results(monkeypatch, capsys)
     assert "Nenhum trecho recuperado" in capsys.readouterr().out
 
 
-def test_cli_chat_saves_on_exit_and_streams_tokens(monkeypatch, capsys):
+def test_cli_chat_streams_tokens_without_saving_topology(monkeypatch, capsys):
     async def chat(_question):
         yield "Olá"
         yield " mundo"
@@ -137,7 +137,7 @@ def test_cli_chat_saves_on_exit_and_streams_tokens(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "Olá mundo" in out
     assert summarizer.await_count == 1
-    rag.persistence.save_topology.assert_called_once_with(rag.engine)
+    rag.persistence.save_topology.assert_not_called()
 
 
 def test_cli_chat_unloaded_index_exits(monkeypatch, capsys):

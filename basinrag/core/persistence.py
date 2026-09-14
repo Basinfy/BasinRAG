@@ -520,7 +520,7 @@ class BasinPersistence:
         for revision_field in ("encoder_revision", "tokenizer_revision", "reranker_revision"):
             if not isinstance(metadata.get(revision_field), str) or not metadata[revision_field]:
                 raise ValueError(f"Manifesto v3 sem revisão imutável: {revision_field}")
-        if int(metadata.get("chunk_policy_version", 0)) != 1:
+        if int(metadata.get("chunk_policy_version", 0)) not in (1, 2):
             raise ValueError("Política de chunking ausente ou não suportada")
         for key in ("sources", "source_file_hashes"):
             if not isinstance(metadata.get(key), dict):
@@ -532,7 +532,7 @@ class BasinPersistence:
         if mode == "tokens":
             size = metadata.get("chunk_size_tokens")
             overlap = metadata.get("chunk_overlap_tokens")
-        elif mode == "characters":
+        elif mode in ("characters", "adaptive"):
             size = metadata.get("chunk_size")
             overlap = metadata.get("chunk_overlap")
         else:
@@ -541,6 +541,10 @@ class BasinPersistence:
             raise ValueError("Manifesto v2 sem limite de chunk válido")
         if overlap is not None and (not isinstance(overlap, int) or overlap < 0):
             raise ValueError("Manifesto v2 com overlap inválido")
+        if mode == "adaptive":
+            threshold = metadata.get("adaptive_threshold_chars")
+            if threshold is not None and (not isinstance(threshold, int) or threshold <= 0):
+                raise ValueError("Manifesto v3 com limiar adaptativo inválido")
 
     def _prune_builds(self, keep) -> None:
         """Retain the active and immediately previous snapshots after successful publish."""

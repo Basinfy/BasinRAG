@@ -31,16 +31,18 @@ def _v3_index_metadata(source_file_hashes=None):
     return {
         "format_version": 3,
         "encoder_model": "unconfigured",
-        "encoder_revision": "unresolved",
+        "encoder_revision": "a" * 40,
         "tokenizer": "unconfigured",
-        "tokenizer_revision": "unresolved",
+        "tokenizer_revision": "a" * 40,
         "reranker_revision": "disabled",
-        "chunking_mode": "characters",
-        "chunk_policy_version": 1,
+        "chunking_mode": "adaptive",
+        "chunk_policy_version": 2,
         "chunk_size": 512,
         "chunk_overlap": 0,
         "chunk_size_tokens": None,
         "chunk_overlap_tokens": None,
+        "adaptive_threshold_chars": 4000,
+        "ranking_mode": "hybrid_rrf",
         "sources": {},
         "source_file_hashes": source_file_hashes or {},
     }
@@ -86,10 +88,12 @@ def test_ingest_second_file_preserves_first(tmp_path, monkeypatch):
     engine.partition_into_basins()
     store = BasinPersistence(str(storage))
     store.save_topology(engine)
+    engine.index_metadata = _v3_index_metadata()
 
     class FakeIngestor:
         def __init__(self, *args, **kwargs):
             self.encoder = None
+            self.model_revision = "a" * 40
             self.last_ingest_status = {}
 
         def ingest(self, path):
@@ -110,7 +114,8 @@ def test_ingest_second_file_preserves_first(tmp_path, monkeypatch):
     from basinrag.factory import BasinRAG, BasinRAGConfig
 
     rag = BasinRAG(BasinRAGConfig(
-        storage_dir=str(storage), encoder_model="unconfigured", chunk_overlap=0,
+        storage_dir=str(storage), encoder_model="unconfigured", encoder_revision="a" * 40,
+        chunk_overlap=0,
         use_rerank=False,
     ))
     rag.engine = engine
@@ -349,6 +354,7 @@ def test_sync_replaces_changed_source_and_removes_deleted_source(tmp_path, monke
     class FakeIngestor:
         def __init__(self, *args, **kwargs):
             self.encoder = None
+            self.model_revision = "a" * 40
             self.nodes = [changed_a]
 
         def ingest(self, path):
@@ -367,7 +373,8 @@ def test_sync_replaces_changed_source_and_removes_deleted_source(tmp_path, monke
     from basinrag.factory import BasinRAG, BasinRAGConfig
 
     rag = BasinRAG(BasinRAGConfig(
-        storage_dir=storage, encoder_model="unconfigured", chunk_overlap=0,
+        storage_dir=storage, encoder_model="unconfigured", encoder_revision="a" * 40,
+        chunk_overlap=0,
         use_rerank=False,
     ))
     rag.engine = engine
@@ -412,6 +419,7 @@ def test_sync_does_not_record_hash_for_source_that_failed_ingestion(tmp_path, mo
     class FakeIngestor:
         def __init__(self, *args, **kwargs):
             self.encoder = None
+            self.model_revision = "a" * 40
             self.last_ingest_status = {}
             self.calls = []
 
@@ -437,7 +445,8 @@ def test_sync_does_not_record_hash_for_source_that_failed_ingestion(tmp_path, mo
     from basinrag.factory import BasinRAG, BasinRAGConfig
 
     rag = BasinRAG(BasinRAGConfig(
-        storage_dir=storage, encoder_model="unconfigured", chunk_overlap=0,
+        storage_dir=storage, encoder_model="unconfigured", encoder_revision="a" * 40,
+        chunk_overlap=0,
         use_rerank=False,
     ))
     rag.engine = engine
@@ -480,6 +489,7 @@ def test_reindex_aborts_on_source_error_and_preserves_active_snapshot(tmp_path, 
     class FakeIngestor:
         def __init__(self, *args, **kwargs):
             self.encoder = None
+            self.model_revision = "a" * 40
             self.last_ingest_status = {}
 
         def ingest_directory(self, path):
@@ -494,7 +504,8 @@ def test_reindex_aborts_on_source_error_and_preserves_active_snapshot(tmp_path, 
 
     destination = str(tmp_path / "new-v3-destination")
     rag = BasinRAG(BasinRAGConfig(
-        storage_dir=destination, encoder_model="unconfigured", chunk_overlap=0,
+        storage_dir=destination, encoder_model="unconfigured", encoder_revision="a" * 40,
+        chunk_overlap=0,
         use_rerank=False,
     ))
 

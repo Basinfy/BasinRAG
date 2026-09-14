@@ -10,6 +10,7 @@ from langchain_core.documents import Document
 from .local_search import TopologicalLocalSearch
 from .global_search import TopologicalGlobalSearch
 from .hybrid_search import HybridSearch
+from .fusion import index_is_flat
 from .reranker import CrossEncoderReranker
 from .router import IntelligentQueryRouter
 from .briefing import BriefingPacket, cap_satellite
@@ -216,7 +217,7 @@ class BasinRAGRetriever(BaseRetriever):
         # remains briefing context appended after those seed passages.
         seed_items = list(zip(packet.node_ids[:seed_count], packet.hubs[:seed_count]))
         context_ids = packet.node_ids[seed_count:]
-        if seed_items and self.use_rerank and self._reranker:
+        if seed_items and self._should_rerank():
             ordered = self._reranker.rerank_items(query, seed_items, top_k=k)
             packet.node_ids = [nid for nid, _ in ordered] + context_ids
             packet.hubs = [text for _, text in ordered]
@@ -239,6 +240,18 @@ class BasinRAGRetriever(BaseRetriever):
             if "query_embedding" not in str(exc):
                 raise
             return self._global.search_structured(query, top_k_basins=top_k_basins)
+
+    def _should_rerank(self) -> bool:
+        """Cross-encoder runs after the hybrid pool on chunked indexes only.
+
+        Flat SciFact-style corpora keep the published dense-led order. Long-doc
+        QASPER-style indexes may rerank the RRF seeds when ``use_rerank`` is on.
+        """
+        return bool(
+            self.use_rerank
+            and self._reranker is not None
+            and not index_is_flat(self.engine)
+        )
 
     def _basin_context_nodes(self, seed_ids: List[str], limit: int) -> List[dict[str, Any]]:
         """Hydrate rho-tree siblings after RRF seeds. Flat 1:1 basins add nothing."""

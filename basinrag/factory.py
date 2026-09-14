@@ -19,6 +19,7 @@ from .indexer.ingestor import BasinIngestor
 from .indexer.summarizer import BasinSummarizer
 from .indexer.bm25 import BM25Index, current_stemmer_version
 from .retriever.base import BasinRAGRetriever
+from .retriever.fusion import index_is_flat
 from .retriever.briefing import BriefingPacket
 from .retriever.prompts import QUERY_PROMPT, build_rag_prompts
 
@@ -985,7 +986,7 @@ class BasinRAG:
         if not self._loaded:
             raise RuntimeError("Nenhum snapshot válido foi carregado")
         retriever, _engine = self._capture_retriever()
-        if self.config.use_rerank:
+        if self.config.use_rerank and not index_is_flat(self.engine):
             assert retriever._reranker is not None
             retriever._reranker._load_model()
 

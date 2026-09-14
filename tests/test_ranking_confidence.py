@@ -131,6 +131,40 @@ def test_default_mode_hydrates_basin_siblings_after_rrf_seeds(monkeypatch):
     assert "topology context" in packet.neighbors
 
 
+def test_brief_skips_cross_encoder_on_flat_index(monkeypatch):
+    retriever, _hybrid = _make_retriever(monkeypatch, search_type="hybrid")
+    retriever.use_rerank = True
+    calls = []
+
+    class _RR:
+        def rerank_items(self, _query, items, top_k=None):
+            calls.append(list(items))
+            return list(items)[:top_k]
+
+    retriever._reranker = _RR()
+    packet = retriever.brief("a representative question", top_k=2)
+    assert calls == []
+    assert packet.node_ids[:2] == ["seed-a", "seed-b"]
+
+
+def test_brief_reranks_longdoc_pool_after_rrf(monkeypatch):
+    retriever, _hybrid = _make_retriever(monkeypatch, search_type="hybrid")
+    retriever.use_rerank = True
+    retriever.engine.graph.nodes["seed-b"]["chunk_index"] = 1
+    retriever.engine.basins = {"b": object()}
+    calls = []
+
+    class _RR:
+        def rerank_items(self, _query, items, top_k=None):
+            calls.append(list(items))
+            return list(reversed(items))[:top_k]
+
+    retriever._reranker = _RR()
+    packet = retriever.brief("a representative question", top_k=2)
+    assert calls
+    assert packet.node_ids[:2] == ["seed-b", "seed-a"]
+
+
 @pytest.mark.parametrize("search_type", ["local", "global"])
 def test_experimental_route_preserves_topological_override_but_not_its_confidence(
     monkeypatch, search_type

@@ -1,6 +1,6 @@
 # Referência da API do BasinRAG
 
-BasinRAG combina BM25 e FAISS por RRF no modo padrão `hybrid_rrf`. Em índices flat (1 nó por documento) α=0.15 e pool `max(50, top_k×5)`; o BM25 só vota no RRF dentro do pool denso. Em índices fatiados α=0.40, pool `max(200, top_k×10)`, folhas sentence-window (~1–2 sentenças), first-stage por paper, expansão léxica RM3 sem LLM, união BM25@10 no membership e até 2 papers só-BM25 inseridos na 3ª posição. As bacias particionam o índice e o briefing padrão hidrata irmãos da árvore ρ depois das sementes RRF; hop/DRF não reordenam as sementes. `experimental_topology` ativa a ordenação topológica experimental.
+BasinRAG combina BM25 e FAISS por RRF no modo padrão `hybrid_rrf`. Em índices flat (1 nó por documento) α=0.15 e pool `max(50, top_k×5)`; o BM25 só vota no RRF dentro do pool denso. Em índices fatiados α=0.40, pool `max(200, top_k×10)`, folhas sentence-window (~1–2 sentenças), first-stage por paper, expansão léxica RM3 sem LLM, união BM25@10 no membership e até 2 papers só-BM25 inseridos na 3ª posição. O cross-encoder padrão, se ligado, só reordena esse pool em índices fatiados. As bacias particionam o índice e o briefing padrão hidrata irmãos da árvore ρ depois das sementes RRF; hop/DRF não reordenam as sementes. `experimental_topology` ativa a ordenação topológica experimental.
 
 ## SDK Python
 
@@ -34,7 +34,7 @@ BasinRAG combina BM25 e FAISS por RRF no modo padrão `hybrid_rrf`. Em índices 
 | `chunk_overlap_tokens` | `int \| None` | `None` | Overlap em tokens; requer `chunk_size_tokens`. |
 | `embedding_batch_size` | `int` | `64` | Textos enviados ao encoder por lote. |
 | `query_prompt` | `str` | Instrução BGE | Prefixo da consulta para o encoder. |
-| `use_rerank` | `bool` | `True` | Habilita o cross-encoder após a busca. |
+| `use_rerank` | `bool` | `True` | Cross-encoder após o pool híbrido em índices fatiados. Índices flat (SciFact) ignoram o rerank. |
 | `enable_background_l3` | `bool` | `False` | Habilita sumarização em background. |
 | `allow_remote_l3_egress` | `bool` | `False` | Opt-in adicional para enviar trechos a um LLM remoto para sumarização. |
 | `min_confidence` | `float` | `0.15` | Limiar heurístico de abstenção; não é confiança calibrada. |

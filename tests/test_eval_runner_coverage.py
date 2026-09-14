@@ -391,6 +391,7 @@ def test_run_gate_index_helpers_build_and_surface_save_failures(monkeypatch):
     run_gate.index_long_docs(long_rag, {"doc": "alpha beta gamma delta"}, 8, 1)
     assert len(long_rag.engine.graph) > 1
     assert all(data["source"] == "doc" for _, data in long_rag.engine.graph.nodes(data=True))
+    assert all("parent_span" in data["metadata"] for _, data in long_rag.engine.graph.nodes(data=True))
 
 
 def test_mteb_wrapper_indexes_dict_cache_and_limits():

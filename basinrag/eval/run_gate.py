@@ -269,28 +269,27 @@ def index_flat_docs(rag: BasinRAG, corpus: Dict[str, str], reranker_enabled: boo
 
 
 def index_long_docs(rag: BasinRAG, corpus: Dict[str, str], chunk_size: int, chunk_overlap: int, reranker_enabled: bool = False) -> None:
-    """Chunk each document under a shared source so basins can have size > 1."""
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
+    """Sentence-window leaves under a shared source; SciFact stays in index_flat_docs."""
+    from ..core.ids import make_node_id
+    from ..indexer.ingestor import SENTENCE_WINDOW_RADIUS, split_sentence_leaves
 
     expected_build_id = rag.persistence.current_build_id()
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        separators=["\n\n", "\n", ".", " ", ""],
-    )
     nodes: List[Dict[str, Any]] = []
     texts_acc: List[str] = []
-    meta_acc: List[Tuple[str, int, str]] = []
+    meta_acc: List[Tuple[str, int, str, int]] = []
     for doc_id, text in corpus.items():
-        chunks = [c for c in splitter.split_text(text) if c.strip()]
+        chunks = [c for c in split_sentence_leaves(text, chunk_size, chunk_overlap) if c.strip()]
+        n_chunks = len(chunks)
         for i, chunk in enumerate(chunks):
             texts_acc.append(chunk)
-            meta_acc.append((doc_id, i, chunk))
-    embeddings = rag.ingestor.encoder.encode(
-        texts_acc, batch_size=64, normalize_embeddings=True, show_progress_bar=True
-    )
-    from ..core.ids import make_node_id
-    for (doc_id, i, chunk), emb in zip(meta_acc, embeddings):
+            meta_acc.append((doc_id, i, chunk, n_chunks))
+    if texts_acc:
+        embeddings = rag.ingestor.encoder.encode(
+            texts_acc, batch_size=64, normalize_embeddings=True, show_progress_bar=True
+        )
+    else:
+        embeddings = []
+    for (doc_id, i, chunk, n_chunks), emb in zip(meta_acc, embeddings):
         layers = node_layers(chunk)
         nodes.append({
             "id": make_node_id(doc_id, i, chunk),
@@ -300,7 +299,15 @@ def index_long_docs(rag: BasinRAG, corpus: Dict[str, str], chunk_size: int, chun
             "chunk_index": i,
             "l1": layers["l1"],
             "l2": layers["l2"],
-            "metadata": {"doc_id": doc_id},
+            "metadata": {
+                "doc_id": doc_id,
+                "role": "child",
+                "parent_span": [
+                    max(0, i - SENTENCE_WINDOW_RADIUS),
+                    min(n_chunks - 1, i + SENTENCE_WINDOW_RADIUS),
+                ],
+                "parent_doc": doc_id,
+            },
         })
     rag.engine.encoder_model = rag.config.encoder_model
     rag.engine.build_graph(nodes)
@@ -465,8 +472,8 @@ def parse_args():
     p.add_argument("--max-scifact-queries", type=int, default=None)
     p.add_argument("--max-papers", type=int, default=None)
     p.add_argument("--max-long-queries", type=int, default=None)
-    p.add_argument("--chunk-size", type=int, default=1000)
-    p.add_argument("--chunk-overlap", type=int, default=100)
+    p.add_argument("--chunk-size", type=int, default=256)
+    p.add_argument("--chunk-overlap", type=int, default=32)
     p.add_argument("--top-k", type=int, default=10)
     return p.parse_args()
 

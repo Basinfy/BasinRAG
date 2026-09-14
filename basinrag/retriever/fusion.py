@@ -1,11 +1,24 @@
-"""Weighted RRF (α=0.15, k=60) fused on node ids, with optional experimental signals."""
+"""Weighted RRF fused on node ids, with optional experimental signals.
+
+Flat indexes (SciFact-style, one node per document) use α=0.15 and a dense
+allowlist. Chunked long-doc indexes use α=0.40 and may union BM25@10 documents
+into RRF membership; SciFact never does.
+"""
 from __future__ import annotations
 
 import math
-from typing import Dict, List, Optional, Sequence
+from collections import defaultdict, deque
+from typing import Any, Dict, List, Optional, Sequence
 
 # Dense-led fusion: BM25 is a light lexical vote inside the dense pool.
 HYBRID_ALPHA = 0.15
+LONGDOC_HYBRID_ALPHA = 0.40
+LONGDOC_CANDIDATE_K_MIN = 200
+LONGDOC_CANDIDATE_K_MULT = 10
+LONGDOC_RESCUE_M = 2
+LONGDOC_RESCUE_FROM = 80
+LONGDOC_RESCUE_SLOT = 2
+LONGDOC_UNION_BM25_DOCS = 10
 RRF_K = 60
 HOP_LAMBDA = 0.35
 # Prefer neutral for production recall: unreachable lexical hits keep seed-tier weight.
@@ -46,6 +59,36 @@ def weighted_rrf(
     for rank, nid in enumerate(semantic_ids[:max_depth]):
         scores[nid] = scores.get(nid, 0.0) + (1.0 - alpha) / (k + rank + 1)
     return scores
+
+
+def index_is_flat(engine: Any) -> bool:
+    """True when each document is a single node (SciFact / MTEB control).
+
+    Same geometry as the MTEB wrapper: every ``chunk_index`` is 0 and basins
+    are ~1:1 with nodes. Chunked long-doc indexes are not flat.
+    """
+    graph = getattr(engine, "graph", None)
+    if graph is None:
+        return True
+    n = graph.number_of_nodes()
+    if n == 0:
+        return True
+    chunk_indexes = set()
+    for _, data in graph.nodes(data=True):
+        chunk_indexes.add(int(data.get("chunk_index", 0) or 0))
+        if len(chunk_indexes) > 1:
+            return False
+    if chunk_indexes != {0}:
+        return False
+    n_basins = len(getattr(engine, "basins", None) or {})
+    return n_basins >= max(1, int(0.9 * n))
+
+
+def resolve_hybrid_alpha(engine: Any, alpha: Optional[float] = None) -> float:
+    """Return the RRF α for this index. Explicit ``alpha`` wins over geometry."""
+    if alpha is not None:
+        return float(alpha)
+    return HYBRID_ALPHA if index_is_flat(engine) else LONGDOC_HYBRID_ALPHA
 
 
 def apply_hop_prior(
@@ -115,3 +158,113 @@ def multi_signal_drf(
 def ranked_ids(scores: Dict[str, float], top_k: int) -> List[str]:
     """Return top_k node IDs sorted by descending score."""
     return [nid for nid, _ in sorted(scores.items(), key=lambda x: x[1], reverse=True)[:top_k]]
+
+
+def unique_document_membership(
+    engine: Any,
+    node_ids: Sequence[str],
+    max_docs: int = LONGDOC_UNION_BM25_DOCS,
+) -> List[str]:
+    """First node of each of the first ``max_docs`` unique documents.
+
+    Long-doc RRF membership may include these BM25@10 papers. Flat indexes
+    must not call this into the allowlist.
+    """
+    if max_docs <= 0:
+        return []
+    seen: set[str] = set()
+    out: List[str] = []
+    for nid in node_ids:
+        doc = node_document_id(engine, nid)
+        if not doc or doc in seen:
+            continue
+        seen.add(doc)
+        out.append(str(nid))
+        if len(out) >= max_docs:
+            break
+    return out
+
+
+def node_document_id(engine: Any, nid: str) -> str:
+    graph = getattr(engine, "graph", None)
+    if graph is None or nid not in graph:
+        return str(nid)
+    data = graph.nodes[nid]
+    meta = data.get("metadata") or {}
+    return str(meta.get("doc_id") or data.get("source") or nid)
+
+
+def diversify_by_document(
+    engine: Any,
+    order: Sequence[str],
+    scores: Dict[str, float],
+    top_k: int,
+) -> List[str]:
+    """Rank documents by max chunk score, then round-robin chunks.
+
+    Long-doc first-stage: a paper with many mid chunks must not occupy the
+    entire top-k before a second paper's best chunk is seen. Flat one-node
+    corpora are a no-op (each id is already its document).
+    """
+    if top_k <= 0 or not order:
+        return []
+    by_doc: Dict[str, List[str]] = defaultdict(list)
+    for nid in order:
+        by_doc[node_document_id(engine, nid)].append(nid)
+    doc_score = {
+        doc: max(scores.get(nid, 0.0) for nid in nids)
+        for doc, nids in by_doc.items()
+    }
+    docs_ranked = sorted(doc_score, key=lambda doc: doc_score[doc], reverse=True)
+    queues = {doc: deque(by_doc[doc]) for doc in docs_ranked}
+    out: List[str] = []
+    while len(out) < top_k:
+        progressed = False
+        for doc in docs_ranked:
+            if queues[doc]:
+                out.append(queues[doc].popleft())
+                progressed = True
+                if len(out) >= top_k:
+                    break
+        if not progressed:
+            break
+    return out
+
+
+def rescue_lexical_documents(
+    engine: Any,
+    order: Sequence[str],
+    bm25_ids: Sequence[str],
+    dense_ids: Sequence[str],
+    top_k: int,
+    m: int = LONGDOC_RESCUE_M,
+    head: int = LONGDOC_RESCUE_FROM,
+    slot: int = LONGDOC_RESCUE_SLOT,
+) -> List[str]:
+    """Splice up to ``m`` BM25-only documents into the ranked list.
+
+    Allowlist still blocks lexical-only ids from RRF. On long-doc corpora the
+    stronger BM25 arm would otherwise never reach nDCG@10. Flat indexes must
+    not call this. Extras replace the tail so ``top_k`` is unchanged.
+    """
+    if top_k <= 0 or m <= 0:
+        return list(order[:top_k])
+    dense = set(dense_ids)
+    seen_docs = {node_document_id(engine, nid) for nid in order}
+    extra: List[str] = []
+    for nid in bm25_ids[:head]:
+        if nid in dense:
+            continue
+        doc = node_document_id(engine, nid)
+        if not doc or doc in seen_docs:
+            continue
+        extra.append(nid)
+        seen_docs.add(doc)
+        if len(extra) >= m:
+            break
+    if not extra:
+        return list(order[:top_k])
+    extra_set = set(extra)
+    kept = [nid for nid in order if nid not in extra_set]
+    insert_at = min(max(slot, 0), max(0, top_k - len(extra)))
+    return (kept[:insert_at] + extra + kept[insert_at:])[:top_k]

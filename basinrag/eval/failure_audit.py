@@ -26,7 +26,7 @@ except Exception:
 import numpy as np
 
 from ..factory import BasinRAG, BasinRAGConfig
-from ..retriever.fusion import apply_hop_prior, ranked_ids, weighted_rrf
+from ..retriever.fusion import apply_hop_prior, ranked_ids, resolve_hybrid_alpha, weighted_rrf
 from .gate import (
     QUERY_PROMPT,
     GateSearcher,
@@ -81,7 +81,12 @@ def audit_query_stages(
     dense = local.dense_hits(emb, top_k=ck)
     dense_ids = [h["id"] for h in dense]
 
-    rrf_scores = weighted_rrf(bm25_ids, dense_ids, bm25_allowlist=dense_ids)
+    rrf_scores = weighted_rrf(
+        bm25_ids,
+        dense_ids,
+        alpha=resolve_hybrid_alpha(engine),
+        bm25_allowlist=dense_ids,
+    )
     rrf_order = ranked_ids(rrf_scores, ck)
 
     # Same hop BFS as HybridSearch (candidates only)

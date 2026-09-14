@@ -73,6 +73,8 @@ def test_hybrid_candidate_k_matches_gate():
     assert HybridSearch.resolve_candidate_k(10) == 50
     assert HybridSearch.resolve_candidate_k(20) == 100
     assert HybridSearch.resolve_candidate_k(10, candidate_k=30) == 30
+    assert HybridSearch.resolve_candidate_k(10, long_doc=True) == 200
+    assert HybridSearch.resolve_candidate_k(50, long_doc=True) == 500
 
 
 def test_query_routing():

@@ -12,9 +12,14 @@ from basinrag.core import llm as llm_module
 from basinrag.core.llm import UniversalLLM
 from basinrag.retriever.fusion import (
     apply_hop_prior,
+    diversify_by_document,
+    index_is_flat,
     multi_signal_drf,
     ranked_ids,
+    rescue_lexical_documents,
+    resolve_hybrid_alpha,
     tanh_soft_brake,
+    unique_document_membership,
     weighted_rrf,
 )
 from basinrag.retriever.reranker import CrossEncoderReranker
@@ -457,6 +462,74 @@ def test_weighted_rrf_allowlist_drops_lexical_only_outsiders():
     assert "lexical_only" not in scores
     assert scores["semantic_only"] > 0
     assert scores["both"] > scores["semantic_only"]
+
+
+def test_index_is_flat_and_resolve_hybrid_alpha():
+    empty = SimpleNamespace(graph=SimpleNamespace(number_of_nodes=lambda: 0, nodes=lambda data=True: []), basins={})
+    assert index_is_flat(empty) is True
+    assert resolve_hybrid_alpha(empty) == pytest.approx(0.15)
+    assert resolve_hybrid_alpha(empty, alpha=0.40) == pytest.approx(0.40)
+
+    import networkx as nx
+
+    flat = SimpleNamespace(graph=nx.Graph(), basins={})
+    for i in range(5):
+        flat.graph.add_node(f"d{i}", chunk_index=0)
+        flat.basins[f"b{i}"] = object()
+    assert index_is_flat(flat) is True
+    assert resolve_hybrid_alpha(flat) == pytest.approx(0.15)
+
+    longdoc = SimpleNamespace(graph=nx.Graph(), basins={"b": object()})
+    longdoc.graph.add_node("c0", chunk_index=0)
+    longdoc.graph.add_node("c1", chunk_index=1)
+    assert index_is_flat(longdoc) is False
+    assert resolve_hybrid_alpha(longdoc) == pytest.approx(0.40)
+
+
+def test_diversify_by_document_round_robins_after_max_chunk_score():
+    import networkx as nx
+
+    engine = SimpleNamespace(graph=nx.Graph())
+    engine.graph.add_node("a0", metadata={"doc_id": "A"}, source="A")
+    engine.graph.add_node("a1", metadata={"doc_id": "A"}, source="A")
+    engine.graph.add_node("b0", metadata={"doc_id": "B"}, source="B")
+    scores = {"a0": 3.0, "a1": 2.9, "b0": 2.5}
+    order = ["a0", "a1", "b0"]
+    assert diversify_by_document(engine, order, scores, 2) == ["a0", "b0"]
+    assert diversify_by_document(engine, order, scores, 3) == ["a0", "b0", "a1"]
+    assert diversify_by_document(engine, [], scores, 5) == []
+
+
+def test_rescue_lexical_documents_splices_bm25_only_into_slot():
+    import networkx as nx
+
+    engine = SimpleNamespace(graph=nx.Graph())
+    engine.graph.add_node("d0", metadata={"doc_id": "D0"})
+    engine.graph.add_node("d1", metadata={"doc_id": "D1"})
+    engine.graph.add_node("lex", metadata={"doc_id": "LEX"})
+    order = ["d0", "d1"]
+    out = rescue_lexical_documents(
+        engine, order, ["lex", "d0"], ["d0", "d1"], top_k=3, m=2, slot=2
+    )
+    assert out == ["d0", "d1", "lex"]
+    assert rescue_lexical_documents(
+        engine, order, ["d0"], ["d0", "d1"], top_k=2
+    ) == ["d0", "d1"]
+
+
+def test_unique_document_membership_keeps_first_node_per_doc():
+    import networkx as nx
+
+    engine = SimpleNamespace(graph=nx.Graph())
+    engine.graph.add_node("a0", metadata={"doc_id": "A"})
+    engine.graph.add_node("a1", metadata={"doc_id": "A"})
+    engine.graph.add_node("b0", metadata={"doc_id": "B"})
+    engine.graph.add_node("c0", metadata={"doc_id": "C"})
+    assert unique_document_membership(engine, ["a0", "a1", "b0", "c0"], max_docs=2) == [
+        "a0",
+        "b0",
+    ]
+    assert unique_document_membership(engine, ["a0"], max_docs=0) == []
 
 
 def test_hop_prior_enabled_disabled_penalty_and_empty_inputs():

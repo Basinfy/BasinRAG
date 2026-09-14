@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 import os
+import re
 import sys
 from pathlib import Path
 import numpy as np
@@ -14,6 +15,92 @@ from .condensation import node_layers
 _TEXT_EXTS = {".txt", ".md", ".markdown"}
 _PDF_EXTS = {".pdf"}
 _SKIP_DIRS = {".git", ".basinrag", "__pycache__", "node_modules", ".venv", "venv"}
+# LlamaIndex sentence-window: retrieve 1–2 sentences, hydrate ±3 at brief time.
+SENTENCE_WINDOW_RADIUS = 3
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n{2,}")
+
+
+def split_sentence_leaves(
+    text: str,
+    max_chars: int = 256,
+    overlap_chars: int = 32,
+    max_sentences: int = 2,
+) -> List[str]:
+    """Pack 1–2 sentences (or ~128 tokens) into retrieval leaves.
+
+    Overflow longer than ``max_chars`` falls back to the character splitter so
+    a methods paragraph still becomes multiple children. Long-doc indexing
+    uses this; SciFact stays one node per document.
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+    max_chars = max(1, int(max_chars))
+    overlap_chars = max(0, int(overlap_chars))
+    if max_chars > 1:
+        overlap_chars = min(overlap_chars, max_chars - 1)
+    max_sentences = max(1, int(max_sentences))
+
+    raw_parts = [part.strip() for part in _SENTENCE_SPLIT.split(text) if part and part.strip()]
+    if not raw_parts:
+        raw_parts = [text]
+
+    units: List[str] = []
+    overflow = RecursiveCharacterTextSplitter(
+        chunk_size=max_chars,
+        chunk_overlap=overlap_chars,
+        separators=["\n\n", "\n", ". ", "? ", "! ", "; ", " ", ""],
+    )
+    for part in raw_parts:
+        if len(part) <= max_chars:
+            units.append(part)
+        else:
+            units.extend(chunk.strip() for chunk in overflow.split_text(part) if chunk.strip())
+    if not units:
+        return []
+
+    leaves: List[str] = []
+    buf: List[str] = []
+    buf_len = 0
+
+    def _flush() -> None:
+        nonlocal buf, buf_len
+        if not buf:
+            return
+        leaf = " ".join(buf)
+        if not leaves or leaves[-1] != leaf:
+            leaves.append(leaf)
+        if overlap_chars <= 0:
+            buf = []
+            buf_len = 0
+            return
+        keep: List[str] = []
+        keep_len = 0
+        for item in reversed(buf):
+            add = len(item) + (1 if keep else 0)
+            if keep and keep_len + add > overlap_chars:
+                break
+            keep.append(item)
+            keep_len += add
+        buf = list(reversed(keep))
+        buf_len = keep_len
+
+    for unit in units:
+        extra = len(unit) + (1 if buf else 0)
+        if buf and (len(buf) >= max_sentences or buf_len + extra > max_chars):
+            _flush()
+            extra = len(unit) + (1 if buf else 0)
+            if buf and buf_len + extra > max_chars:
+                buf = []
+                buf_len = 0
+                extra = len(unit)
+        buf.append(unit)
+        buf_len += extra if buf_len else len(unit)
+    if buf:
+        leaf = " ".join(buf)
+        if not leaves or leaves[-1] != leaf:
+            leaves.append(leaf)
+    return leaves
 
 
 def _legacy_chunk_length(text: str) -> int:
@@ -334,8 +421,11 @@ class BasinIngestor:
                 meta = dict((metadata_list[i] if metadata_list else {}) or {})
                 meta["doc_id"] = meta.get("doc_id") or source
                 meta["role"] = "child"
-                # Parent context = local window (±1 chunk); retrieved at brief time via neighbors.
-                meta["parent_span"] = [max(0, i - 1), min(n - 1, i + 1)]
+                # Sentence-window parent: retrieve the leaf, hydrate ±3 at brief time.
+                meta["parent_span"] = [
+                    max(0, i - SENTENCE_WINDOW_RADIUS),
+                    min(n - 1, i + SENTENCE_WINDOW_RADIUS),
+                ]
                 meta["parent_doc"] = source
                 nodes.append({
                     "id": make_node_id(source, i, txt),

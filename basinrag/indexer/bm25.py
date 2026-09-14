@@ -295,6 +295,41 @@ class BM25Index:
         ranked = sorted(acc.items(), key=lambda x: x[1], reverse=True)[:top_k]
         return [(self.doc_ids[i], float(s)) for i, s in ranked]
 
+    def expansion_terms(
+        self,
+        query: str,
+        feedback_texts: Sequence[str],
+        n_terms: int = 8,
+    ) -> List[str]:
+        """IDF-weighted terms from top BM25 hits, excluding the query (no LLM)."""
+        if self.n == 0 or not feedback_texts or n_terms <= 0:
+            return []
+        lang = detect_language(query) or getattr(self, "corpus_lang", None)
+        stops = _STOP_BY_LANG.get(lang, set()) if lang else set()
+        query_terms = set()
+        for tok in tokenize(query):
+            if lang is not None and tok in stops:
+                continue
+            if self.stemming and lang is not None:
+                tok = stem_token(tok, lang=lang)
+            query_terms.add(tok)
+        tf: Dict[str, int] = {}
+        for text in feedback_texts:
+            for tok in tokenize(text or ""):
+                if lang is not None and tok in stops:
+                    continue
+                if self.stemming and lang is not None:
+                    tok = stem_token(tok, lang=lang)
+                if tok in query_terms or len(tok) < 3 or tok not in self.df:
+                    continue
+                tf[tok] = tf.get(tok, 0) + 1
+        ranked = sorted(
+            tf.items(),
+            key=lambda item: (item[1] * self._idf(item[0]), item[0]),
+            reverse=True,
+        )
+        return [term for term, _ in ranked[: int(n_terms)]]
+
     def save(self, path: str, build_id: str = "") -> None:
         payload = {
             "doc_ids": self.doc_ids,

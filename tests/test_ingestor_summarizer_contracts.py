@@ -10,6 +10,7 @@ import pytest
 
 from basinrag.indexer.ingestor import BasinIngestor
 from basinrag.indexer.ingestor import TokenAwareTextSplitter
+from basinrag.indexer.ingestor import SENTENCE_WINDOW_RADIUS, split_sentence_leaves
 from basinrag.indexer.summarizer import BasinSummarizer, extract_json_payload
 
 
@@ -345,6 +346,27 @@ def test_ingestor_encodes_single_chunk_and_supplies_default_metadata(monkeypatch
     assert nodes[0]["metadata"]["parent_span"] == [0, 0]
     assert nodes[0]["metadata"]["parent_doc"] == "source-id"
     assert nodes[0]["embedding"].dtype == np.float32
+
+
+def test_split_sentence_leaves_packs_one_or_two_sentences():
+    text = "First sentence. Second sentence. Third sentence. Fourth one."
+    leaves = split_sentence_leaves(text, max_chars=80, overlap_chars=20, max_sentences=2)
+    assert len(leaves) >= 2
+    assert "First sentence" in leaves[0]
+    assert all(len(leaf) <= 80 for leaf in leaves)
+    overflow = split_sentence_leaves("A" * 500, max_chars=100, overlap_chars=10)
+    assert len(overflow) > 1
+    assert all(len(leaf) <= 100 for leaf in overflow)
+    assert split_sentence_leaves("   ") == []
+
+
+def test_ingestor_parent_span_uses_sentence_window(monkeypatch):
+    ingestor = _ingestor(monkeypatch)
+    nodes = ingestor._nodes_from_texts(["chunk"] * 5, "src")
+    assert SENTENCE_WINDOW_RADIUS == 3
+    assert nodes[0]["metadata"]["parent_span"] == [0, 3]
+    assert nodes[2]["metadata"]["parent_span"] == [0, 4]
+    assert nodes[4]["metadata"]["parent_span"] == [1, 4]
 
 
 def test_pdf_loading_tracks_page_and_omits_empty_pages(tmp_path, monkeypatch):

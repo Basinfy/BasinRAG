@@ -192,15 +192,8 @@ class BasinRAGMTEBWrapper:
         self._is_flat_index = True  # MTEB wrapper always indexes 1 node per doc
 
     def _detect_flat_index(self) -> bool:
-        engine = self.rag.engine
-        n = engine.graph.number_of_nodes()
-        if n == 0:
-            return True
-        chunk_indexes = {
-            int(data.get("chunk_index", 0))
-            for _, data in engine.graph.nodes(data=True)
-        }
-        return chunk_indexes == {0} and len(engine.basins) >= max(1, int(0.9 * n))
+        from ..retriever.fusion import index_is_flat
+        return index_is_flat(self.rag.engine)
 
     def _rerank_enabled(self) -> bool:
         if self.use_rerank is not None:

@@ -1,20 +1,23 @@
+from types import SimpleNamespace
+
 import networkx as nx
 import numpy as np
 import pytest
 
+from basinrag.indexer.bm25 import BM25Index
 from basinrag.retriever.base import BasinRAGRetriever
 from basinrag.retriever.briefing import BriefingPacket
-from basinrag.retriever.hybrid_search import HybridSearch
+from basinrag.retriever.hybrid_search import HybridSearch, union_bm25_hits
 from basinrag.retriever.router import IntelligentQueryRouter
 
 
 class _Engine:
     def __init__(self):
         self.graph = nx.Graph()
-        self.graph.add_node("seed-a", text="seed A", embedding=np.array([0.8, 0.6], dtype=np.float32))
-        self.graph.add_node("seed-b", text="seed B", embedding=np.array([0.6, 0.8], dtype=np.float32))
-        self.graph.add_node("topology-c", text="topology context", embedding=np.array([0.25, 0.96824586], dtype=np.float32))
-        self.basins = {}
+        self.graph.add_node("seed-a", text="seed A", embedding=np.array([0.8, 0.6], dtype=np.float32), chunk_index=0)
+        self.graph.add_node("seed-b", text="seed B", embedding=np.array([0.6, 0.8], dtype=np.float32), chunk_index=0)
+        self.graph.add_node("topology-c", text="topology context", embedding=np.array([0.25, 0.96824586], dtype=np.float32), chunk_index=0)
+        self.basins = {nid: object() for nid in ("seed-a", "seed-b", "topology-c")}
 
 
 class _Encoder:
@@ -111,6 +114,21 @@ def test_default_mode_keeps_rrf_seed_order_across_routes(monkeypatch, search_typ
             "expand_graph": False,
         }
     ]
+
+
+def test_default_mode_hydrates_basin_siblings_after_rrf_seeds(monkeypatch):
+    retriever, _hybrid = _make_retriever(monkeypatch, search_type="hybrid")
+    tree = nx.DiGraph()
+    tree.add_nodes_from(["seed-a", "topology-c"])
+    retriever.engine.graph.nodes["seed-a"]["basin_id"] = "basin-a"
+    retriever.engine.basins = {"basin-a": SimpleNamespace(rho_tree=tree)}
+
+    packet = retriever.brief("a representative question", top_k=2)
+
+    assert packet.node_ids[:2] == ["seed-a", "seed-b"]
+    assert packet.hubs == ["seed A", "seed B"]
+    assert "topology-c" in packet.node_ids
+    assert "topology context" in packet.neighbors
 
 
 @pytest.mark.parametrize("search_type", ["local", "global"])
@@ -215,3 +233,283 @@ def test_hybrid_does_not_insert_lexical_only_outsiders():
         "question", np.array([1.0, 0.0]), top_k=2, use_confidence_gate=False
     )
     assert [item["id"] for item in hits] == ["seed-a", "seed-b"]
+
+
+def test_hybrid_uses_floor_alpha_on_flat_index(monkeypatch):
+    captured = {}
+
+    def _capture(bm25_ids, semantic_ids, **kwargs):
+        captured["alpha"] = kwargs.get("alpha")
+        captured["allowlist"] = kwargs.get("bm25_allowlist")
+        from basinrag.retriever.fusion import weighted_rrf as orig
+        return orig(bm25_ids, semantic_ids, **kwargs)
+
+    monkeypatch.setattr("basinrag.retriever.hybrid_search.weighted_rrf", _capture)
+
+    class _BM25:
+        n = 2
+
+        def score(self, _query, top_k):
+            return [("seed-a", 1.0), ("seed-b", 0.5)][:top_k]
+
+    class _DenseSearch:
+        def dense_hits(self, _query_embedding, top_k):
+            return [{"id": "seed-a", "score": 0.9}, {"id": "seed-b", "score": 0.8}][:top_k]
+
+    engine = _Engine()
+    engine.bm25 = _BM25()
+    HybridSearch(engine, _DenseSearch()).search_nodes(
+        "question", np.array([1.0, 0.0]), top_k=2, use_confidence_gate=False
+    )
+    assert captured["alpha"] == pytest.approx(0.15)
+
+
+def test_hybrid_uses_longdoc_alpha_when_chunked(monkeypatch):
+    captured = {}
+
+    def _capture(bm25_ids, semantic_ids, **kwargs):
+        captured["alpha"] = kwargs.get("alpha")
+        from basinrag.retriever.fusion import weighted_rrf as orig
+        return orig(bm25_ids, semantic_ids, **kwargs)
+
+    monkeypatch.setattr("basinrag.retriever.hybrid_search.weighted_rrf", _capture)
+
+    class _BM25:
+        n = 2
+
+        def score(self, _query, top_k):
+            return [("seed-a", 1.0), ("seed-b", 0.5)][:top_k]
+
+    class _DenseSearch:
+        def dense_hits(self, _query_embedding, top_k):
+            return [{"id": "seed-a", "score": 0.9}, {"id": "seed-b", "score": 0.8}][:top_k]
+
+    engine = _Engine()
+    engine.graph.nodes["seed-b"]["chunk_index"] = 1
+    engine.basins = {"basin-a": object()}
+    engine.bm25 = _BM25()
+    HybridSearch(engine, _DenseSearch()).search_nodes(
+        "question", np.array([1.0, 0.0]), top_k=2, use_confidence_gate=False
+    )
+    assert captured["alpha"] == pytest.approx(0.40)
+
+
+def test_hybrid_longdoc_rescues_bm25_only_papers():
+    class _BM25:
+        n = 2
+
+        def score(self, _query, top_k):
+            return [("lexical-only", 9.0), ("seed-a", 1.0)][:top_k]
+
+    class _DenseSearch:
+        def dense_hits(self, _query_embedding, top_k):
+            return [{"id": "seed-a", "score": 0.9}, {"id": "seed-b", "score": 0.8}][:top_k]
+
+    engine = _Engine()
+    engine.graph.nodes["seed-b"]["chunk_index"] = 1
+    engine.graph.add_node(
+        "lexical-only",
+        text="rare token match",
+        chunk_index=2,
+        source="paper-lex",
+        metadata={"doc_id": "paper-lex"},
+    )
+    engine.basins = {"b": object()}
+    engine.bm25 = _BM25()
+    hits = HybridSearch(engine, _DenseSearch()).search_nodes(
+        "question", np.array([1.0, 0.0]), top_k=2, use_confidence_gate=False
+    )
+    assert [item["id"] for item in hits] == ["seed-a", "lexical-only"]
+
+
+def test_hybrid_longdoc_ranks_documents_before_repeating_chunks():
+    class _BM25:
+        n = 4
+
+        def score(self, _query, top_k):
+            return [("a0", 4.0), ("a1", 3.0), ("a2", 2.0), ("b0", 1.0)][:top_k]
+
+    class _DenseSearch:
+        def dense_hits(self, _query_embedding, top_k):
+            return [
+                {"id": "a0", "score": 0.99},
+                {"id": "a1", "score": 0.98},
+                {"id": "a2", "score": 0.97},
+                {"id": "b0", "score": 0.90},
+            ][:top_k]
+
+    engine = _Engine()
+    for nid, source, chunk_index in (
+        ("a0", "paper-a", 0),
+        ("a1", "paper-a", 1),
+        ("a2", "paper-a", 2),
+        ("b0", "paper-b", 0),
+    ):
+        engine.graph.add_node(
+            nid,
+            text=nid,
+            embedding=np.array([1.0, 0.0], dtype=np.float32),
+            chunk_index=chunk_index,
+            source=source,
+            metadata={"doc_id": source},
+        )
+    engine.basins = {"b": object()}
+    engine.bm25 = _BM25()
+    hits = HybridSearch(engine, _DenseSearch()).search_nodes(
+        "question", np.array([1.0, 0.0]), top_k=2, use_confidence_gate=False
+    )
+    assert [item["id"] for item in hits] == ["a0", "b0"]
+
+
+def test_hybrid_longdoc_requests_a_deeper_candidate_pool():
+    seen = []
+
+    class _BM25:
+        n = 2
+
+        def score(self, _query, top_k):
+            seen.append(top_k)
+            return [("a0", 1.0), ("b0", 0.5)][:top_k]
+
+    class _DenseSearch:
+        def dense_hits(self, _query_embedding, top_k):
+            seen.append(("dense", top_k))
+            return [{"id": "a0", "score": 0.9}, {"id": "b0", "score": 0.8}][:top_k]
+
+    engine = _Engine()
+    engine.graph.nodes["seed-b"]["chunk_index"] = 1
+    engine.graph.add_node("a0", text="a", chunk_index=0, metadata={"doc_id": "A"})
+    engine.graph.add_node("b0", text="b", chunk_index=1, metadata={"doc_id": "B"})
+    engine.basins = {"b": object()}
+    engine.bm25 = _BM25()
+    HybridSearch(engine, _DenseSearch()).search_nodes(
+        "question", np.array([1.0, 0.0]), top_k=10, use_confidence_gate=False
+    )
+    assert seen[0] == 200
+    assert seen[1] == ("dense", 200)
+
+
+def test_hybrid_longdoc_runs_second_bm25_pass_without_llm():
+    calls = []
+
+    class _BM25:
+        n = 2
+
+        def score(self, query, top_k):
+            calls.append(query)
+            return [("seed-a", 1.0)][:top_k]
+
+        def expansion_terms(self, _query, _texts, n_terms=8):
+            return ["mitochondria"]
+
+    class _DenseSearch:
+        def dense_hits(self, _query_embedding, top_k):
+            return [{"id": "seed-a", "score": 0.9}, {"id": "seed-b", "score": 0.8}][:top_k]
+
+    engine = _Engine()
+    engine.graph.nodes["seed-b"]["chunk_index"] = 1
+    engine.graph.nodes["seed-a"]["text"] = "mitochondria produce atp"
+    engine.basins = {"b": object()}
+    engine.bm25 = _BM25()
+    HybridSearch(engine, _DenseSearch()).search_nodes(
+        "question", np.array([1.0, 0.0]), top_k=2, use_confidence_gate=False
+    )
+    assert calls == ["question", "question mitochondria"]
+
+
+def test_hybrid_longdoc_unions_bm25_only_docs_into_allowlist(monkeypatch):
+    captured = {}
+
+    def _capture(bm25_ids, semantic_ids, **kwargs):
+        captured["allowlist"] = kwargs.get("bm25_allowlist")
+        from basinrag.retriever.fusion import weighted_rrf as orig
+        return orig(bm25_ids, semantic_ids, **kwargs)
+
+    monkeypatch.setattr("basinrag.retriever.hybrid_search.weighted_rrf", _capture)
+
+    class _BM25:
+        n = 2
+
+        def score(self, _query, top_k):
+            return [("lexical-only", 9.0), ("seed-a", 1.0)][:top_k]
+
+    class _DenseSearch:
+        def dense_hits(self, _query_embedding, top_k):
+            return [{"id": "seed-a", "score": 0.9}, {"id": "seed-b", "score": 0.8}][:top_k]
+
+    engine = _Engine()
+    engine.graph.nodes["seed-b"]["chunk_index"] = 1
+    engine.graph.add_node(
+        "lexical-only",
+        text="rare token match",
+        chunk_index=2,
+        source="paper-lex",
+        metadata={"doc_id": "paper-lex"},
+    )
+    engine.basins = {"b": object()}
+    engine.bm25 = _BM25()
+    HybridSearch(engine, _DenseSearch()).search_nodes(
+        "question", np.array([1.0, 0.0]), top_k=2, use_confidence_gate=False
+    )
+    assert "lexical-only" in captured["allowlist"]
+
+
+def test_hybrid_flat_allowlist_still_excludes_lexical_only(monkeypatch):
+    captured = {}
+
+    def _capture(bm25_ids, semantic_ids, **kwargs):
+        captured["allowlist"] = kwargs.get("bm25_allowlist")
+        from basinrag.retriever.fusion import weighted_rrf as orig
+        return orig(bm25_ids, semantic_ids, **kwargs)
+
+    monkeypatch.setattr("basinrag.retriever.hybrid_search.weighted_rrf", _capture)
+
+    class _BM25:
+        n = 2
+
+        def score(self, _query, top_k):
+            return [("lexical-only", 9.0), ("seed-a", 1.0)][:top_k]
+
+    class _DenseSearch:
+        def dense_hits(self, _query_embedding, top_k):
+            return [{"id": "seed-a", "score": 0.9}, {"id": "seed-b", "score": 0.8}][:top_k]
+
+    engine = _Engine()
+    engine.graph.add_node("lexical-only", text="rare token match")
+    engine.bm25 = _BM25()
+    HybridSearch(engine, _DenseSearch()).search_nodes(
+        "question", np.array([1.0, 0.0]), top_k=2, use_confidence_gate=False
+    )
+    assert "lexical-only" not in captured["allowlist"]
+
+
+def test_union_bm25_hits_keeps_primary_order_and_appends_new_ids():
+    merged = union_bm25_hits(
+        [("a", 5.0), ("b", 4.0)],
+        [("c", 9.0), ("a", 1.0)],
+    )
+    ids = [nid for nid, _ in merged]
+    assert ids[0] == "a"
+    assert "c" in ids
+    assert dict(merged)["a"] == pytest.approx(5.0)
+
+
+def test_bm25_expansion_terms_are_idf_weighted_and_exclude_query():
+    index = BM25Index()
+    index.build(
+        ["d1", "d2", "d3"],
+        [
+            "mitochondria produce atp in eukaryotic cells",
+            "chloroplasts capture sunlight in plant cells",
+            "ribosomes synthesize proteins in all cells",
+        ],
+    )
+    terms = index.expansion_terms(
+        "what do mitochondria produce",
+        ["mitochondria produce atp in eukaryotic cells"],
+        n_terms=5,
+    )
+    assert "atp" in terms
+    assert "mitochondria" not in terms
+    assert "produce" not in terms
+    assert index.expansion_terms("empty", [], n_terms=5) == []

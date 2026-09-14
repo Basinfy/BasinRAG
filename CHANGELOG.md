@@ -17,9 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Make L3 opt-in; remote excerpt egress requires a second explicit opt-in and LLM summaries live in a separate sidecar.
 
 ### Retrieval and evaluation
-- Keep `hybrid_rrf` as default; topology remains experimental. Gate decisions require complete, provenance-compatible SciFact and QASPER runs; partial MTEB runs do not publish official means.
+- Keep `hybrid_rrf` as default; hop/DRF ranking remains experimental. Bacias still partition the index and the default briefing hydrates rho-tree siblings after RRF seeds. Flat 1:1 basins add no extra context. Gate decisions require complete, provenance-compatible SciFact and QASPER runs; partial MTEB runs do not publish official means.
 - Existing benchmark artifacts and papers are historical records, not current release claims. This changelog does not approve quantitative claims.
-- Dense-led RRF: BM25 votes only inside the dense/expanded pool; `HYBRID_ALPHA` 0.55 → 0.15. The MTEB wrapper writes snapshot metadata v3 and does not pass MTEB `top_k=1000` into `configure()`.
+- Dense-led RRF: BM25 votes only inside the dense/expanded pool; `HYBRID_ALPHA` 0.15 on flat indexes. Chunked long-doc indexes use sentence-window leaves (~1–2 sentences), `LONGDOC_HYBRID_ALPHA` 0.40, `max(200, top_k*10)` candidates, RM3-style lexical expansion without an LLM, document round-robin, BM25@10 membership, and a quota of 2 BM25-only papers spliced at rank 3. SciFact stays on the flat path. The MTEB wrapper writes snapshot metadata v3 and does not pass MTEB `top_k=1000` into `configure()`.
 - SciFact MTEB on `c1da17e` (`results/runs/mteb-20260913-173459`, no rerank, `BAAI/bge-base-en-v1.5`): nDCG@10 0.74389. Single-task measurement only; not a five-task or twelve-task release mean.
 
 ## [1.0.4] - 2026-09-09

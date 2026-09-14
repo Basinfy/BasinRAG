@@ -1,3 +1,4 @@
+from collections import deque
 from typing import List, Any, Optional
 import numpy as np
 from pydantic import ConfigDict
@@ -143,6 +144,7 @@ class BasinRAGRetriever(BaseRetriever):
                     for nid, text in zip(part.get("node_ids") or [], part.get("hubs") or []):
                         context_nodes.append({"id": nid, "text": text})
 
+            context_nodes.extend(self._basin_context_nodes(packet.node_ids[:seed_count], max(k, 1)))
             seen = set(packet.node_ids)
             for item in context_nodes:
                 nid = item.get("id")
@@ -238,6 +240,34 @@ class BasinRAGRetriever(BaseRetriever):
                 raise
             return self._global.search_structured(query, top_k_basins=top_k_basins)
 
+    def _basin_context_nodes(self, seed_ids: List[str], limit: int) -> List[dict[str, Any]]:
+        """Hydrate rho-tree siblings after RRF seeds. Flat 1:1 basins add nothing."""
+        if limit <= 0 or not seed_ids:
+            return []
+        extra: List[dict[str, Any]] = []
+        seen = set(seed_ids)
+        basins = getattr(self.engine, "basins", None) or {}
+        basin_id_of = getattr(self.engine, "basin_id_of", None)
+        for nid in seed_ids:
+            bid = basin_id_of(nid) if callable(basin_id_of) else None
+            if not bid and nid in self.engine.graph:
+                bid = self.engine.graph.nodes[nid].get("basin_id") or ""
+            basin = basins.get(bid) if bid else None
+            tree = getattr(basin, "rho_tree", None)
+            if tree is None:
+                continue
+            for mid in tree.nodes:
+                if mid in seen or mid not in self.engine.graph:
+                    continue
+                seen.add(mid)
+                extra.append({
+                    "id": mid,
+                    "text": self.engine.graph.nodes[mid].get("text", ""),
+                })
+                if len(extra) >= limit:
+                    return extra
+        return extra
+
     def _dense_confidence(self, query_embedding: np.ndarray, node_ids) -> float:
         """Best raw dense cosine support; deliberately independent of rank/topology scores."""
         query = np.asarray(query_embedding, dtype=np.float32).reshape(-1)
@@ -302,20 +332,59 @@ class BasinRAGRetriever(BaseRetriever):
         """Retrieve child, surface parent window (± sequential neighbors)."""
         if nid not in self.engine.graph:
             return child_text
-        parts = [child_text]
-        seen = {child_text}
-        for nbr in self.engine.graph.neighbors(nid):
-            edge = self.engine.graph.edges[nid, nbr]
-            if edge.get("type") != "sequential":
+        data = self.engine.graph.nodes[nid]
+        meta = data.get("metadata") or {}
+        span = meta.get("parent_span")
+        source = data.get("source")
+        idx = int(data.get("chunk_index", 0) or 0)
+        if not span:
+            parts = [child_text]
+            seen = {child_text}
+            for nbr in self.engine.graph.neighbors(nid):
+                edge = self.engine.graph.edges[nid, nbr]
+                if edge.get("type") != "sequential":
+                    continue
+                txt = self.engine.graph.nodes[nbr].get("text") or ""
+                if txt and txt not in seen:
+                    seen.add(txt)
+                    parts.append(txt)
+            if len(parts) == 1:
+                return child_text
+            return "\n\n".join(parts)
+
+        lo, hi = int(span[0]), int(span[1])
+        window = {idx: child_text}
+        queued = deque([(nid, idx)])
+        seen_ids = {nid}
+        while queued:
+            cur, _cur_idx = queued.popleft()
+            for nbr in self.engine.graph.neighbors(cur):
+                if nbr in seen_ids:
+                    continue
+                edge = self.engine.graph.edges[cur, nbr]
+                if edge.get("type") != "sequential":
+                    continue
+                nd = self.engine.graph.nodes[nbr]
+                if source and nd.get("source") != source:
+                    continue
+                nidx = int(nd.get("chunk_index", 0) or 0)
+                if nidx < lo or nidx > hi:
+                    continue
+                seen_ids.add(nbr)
+                txt = nd.get("text") or ""
+                if txt:
+                    window[nidx] = txt
+                queued.append((nbr, nidx))
+        ordered = [window[idx]]
+        seen_text = {window[idx]}
+        for nidx in sorted(window):
+            if nidx == idx:
                 continue
-            txt = self.engine.graph.nodes[nbr].get("text") or ""
-            if txt and txt not in seen:
-                seen.add(txt)
-                parts.append(txt)
-        if len(parts) == 1:
-            return child_text
-        # Keep child first for ranking fidelity; append neighbors as parent context.
-        return "\n\n".join(parts)
+            txt = window[nidx]
+            if txt not in seen_text:
+                seen_text.add(txt)
+                ordered.append(txt)
+        return "\n\n".join(ordered)
 
     def _get_relevant_documents(
         self, query: str, *, run_manager: CallbackManagerForRetrieverRun

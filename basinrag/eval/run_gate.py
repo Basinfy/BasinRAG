@@ -64,6 +64,77 @@ def load_scifact(revision: Optional[str] = None) -> Tuple[Dict[str, str], Dict[s
     return corpus, queries, qrels
 
 
+QASPER_OFFICIAL_V03_URL = "https://qasper-dataset.s3.us-west-2.amazonaws.com/qasper-train-dev-v0.3.tgz"
+QASPER_OFFICIAL_V03_SHA256 = "a28fdf966db827bcee3d873107d6b6669864fb7ca8fbf73a192f5e39191bdb5a"
+QASPER_OFFICIAL_V03_DEV = "qasper-dev-v0.3.json"
+
+
+def _qasper_rows_from_official(papers: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Convert official QASPER v0.3 JSON objects into the Hugging Face script row shape."""
+    rows: List[Dict[str, Any]] = []
+    for paper_id, paper in papers.items():
+        if not isinstance(paper, dict):
+            continue
+        sections = paper.get("full_text") or []
+        names: List[str] = []
+        paragraphs: List[List[str]] = []
+        if isinstance(sections, list):
+            for section in sections:
+                if not isinstance(section, dict):
+                    continue
+                names.append(str(section.get("section_name") or ""))
+                paras = section.get("paragraphs") or []
+                paragraphs.append([str(p) for p in paras] if isinstance(paras, list) else [])
+        qas = paper.get("qas") or []
+        questions: List[str] = []
+        question_ids: List[Optional[str]] = []
+        if isinstance(qas, list):
+            for qa in qas:
+                if not isinstance(qa, dict):
+                    continue
+                questions.append(str(qa.get("question") or ""))
+                question_ids.append(qa.get("question_id"))
+        rows.append(
+            {
+                "id": str(paper_id),
+                "title": paper.get("title") or "",
+                "abstract": paper.get("abstract") or "",
+                "full_text": {"section_name": names, "paragraphs": paragraphs},
+                "qas": {"question": questions, "question_id": question_ids},
+            }
+        )
+    return rows
+
+
+def _load_official_qasper_v03(cache_dir: Optional[Path] = None) -> List[Dict[str, Any]]:
+    """Load QASPER validation from the canonical v0.3 tarball (HF scripts are gone)."""
+    import hashlib
+    import json
+    import tarfile
+    import urllib.request
+
+    cache = cache_dir or (Path.home() / ".cache" / "basinrag")
+    cache.mkdir(parents=True, exist_ok=True)
+    tarball = cache / "qasper-train-dev-v0.3.tgz"
+    if not tarball.exists() or hashlib.sha256(tarball.read_bytes()).hexdigest() != QASPER_OFFICIAL_V03_SHA256:
+        urllib.request.urlretrieve(QASPER_OFFICIAL_V03_URL, tarball)
+        digest = hashlib.sha256(tarball.read_bytes()).hexdigest()
+        if digest != QASPER_OFFICIAL_V03_SHA256:
+            tarball.unlink(missing_ok=True)
+            raise RuntimeError(f"checksum QASPER v0.3 inválido: {digest}")
+    with tarfile.open(tarball, "r:gz") as archive:
+        member = next((m for m in archive.getmembers() if m.name.endswith(QASPER_OFFICIAL_V03_DEV)), None)
+        if member is None:
+            raise RuntimeError("qasper-dev-v0.3.json ausente no tarball oficial")
+        extracted = archive.extractfile(member)
+        if extracted is None:
+            raise RuntimeError("falha ao ler qasper-dev-v0.3.json do tarball oficial")
+        papers = json.load(extracted)
+    if not isinstance(papers, dict):
+        raise RuntimeError("JSON oficial do QASPER v0.3 não é um objeto de papers")
+    return _qasper_rows_from_official(papers)
+
+
 def load_qasper(max_papers: Optional[int], max_queries: Optional[int], revision: Optional[str] = None) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, Set[str]]]:
     """Long documents: one source per paper, questions retrieve the paper id."""
     try:
@@ -73,10 +144,18 @@ def load_qasper(max_papers: Optional[int], max_queries: Optional[int], revision:
 
     if not revision:
         raise RuntimeError("Informe um commit imutável em --qasper-revision para validar o gate")
+    load_qasper.source = "huggingface"
     try:
         ds = load_dataset("allenai/qasper", split="validation", revision=revision)
     except Exception as first_err:
-        raise RuntimeError(f"QASPER validation indisponível; o gate não pode usar fallback: {first_err}") from first_err
+        try:
+            ds = _load_official_qasper_v03()
+            load_qasper.source = "official_v0.3_json"
+        except Exception as official_err:
+            raise RuntimeError(
+                "QASPER validation indisponível; o gate não pode usar fallback "
+                f"arxiv ({first_err}); tarball oficial v0.3 também falhou: {official_err}"
+            ) from official_err
     corpus: Dict[str, str] = {}
     queries: Dict[str, str] = {}
     qrels: Dict[str, Set[str]] = {}
@@ -487,6 +566,7 @@ def main():
     else:
         try:
             corpus, queries, qrels = load_qasper(args.max_papers, args.max_long_queries, args.qasper_revision)
+            payload["protocol"]["qasper_source"] = getattr(load_qasper, "source", None)
             queries, qrels = _limit_queries(queries, qrels, args.max_long_queries)
             qasper = run_corpus(
                 "QASPER", str(index_root / "qasper"), args.encoder, args.reranker,

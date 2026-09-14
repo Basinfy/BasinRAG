@@ -326,6 +326,26 @@ def test_run_gate_dataset_loaders_use_fake_rows(monkeypatch):
     assert corpus["paper"].endswith("## S\nP")
     assert queries == {"qid": "Q"}
     assert qrels == {"qid": {"paper"}}
+    assert run_gate.load_qasper.source == "huggingface"
+
+    official = run_gate._qasper_rows_from_official(
+        {
+            "1912.01214": {
+                "title": "T",
+                "abstract": "A",
+                "full_text": [{"section_name": "S", "paragraphs": ["P"]}],
+                "qas": [{"question": "Q", "question_id": "qid"}],
+            }
+        }
+    )
+    assert official[0]["id"] == "1912.01214"
+    assert official[0]["full_text"] == {"section_name": ["S"], "paragraphs": [["P"]]}
+
+    monkeypatch.setattr("datasets.load_dataset", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("qasper.py")))
+    monkeypatch.setattr(run_gate, "_load_official_qasper_v03", lambda: official)
+    corpus, queries, qrels = run_gate.load_qasper(None, 1, revision="b" * 40)
+    assert run_gate.load_qasper.source == "official_v0.3_json"
+    assert queries == {"qid": "Q"}
 
 
 def test_run_gate_arxiv_loader_limit_and_query_filter(monkeypatch):

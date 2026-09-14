@@ -38,7 +38,7 @@ graph TD
     subgraph Query
         Q[Query] --> R[BM25 + FAISS]
         R --> S[RRF — default ranking]
-        S --> T[Optional reranker]
+        S --> T[Optional reranker — opt-in, chunked indexes only]
         T --> U[Retrieved seeds]
         U --> V[Optional basin context expansion]
         V --> W[BriefingPacket → LLM]
@@ -83,6 +83,17 @@ basinrag serve --host 127.0.0.1 --port 8000
 
 To call the ASGI application directly, use `uvicorn basinrag.api.server:app`. Public clients require `BASINRAG_API_KEY`; the CLI also refuses a non-loopback bind without a key. Keep the service behind a TLS-terminating reverse proxy when exposing it to a network.
 
+## HTTP API
+
+| Route | Role |
+|---|---|
+| `GET /livez` | Process is up |
+| `GET /readyz` | Snapshot and query dependencies are ready |
+| `POST /query` | Retrieval (`Authorization: Bearer`) |
+| `WS /chat` | Streaming chat (same-origin cookie or Bearer) |
+
+There is no `/v2` prefix. Details: [API reference](docs/API_REFERENCE.md) and [deployment](docs/DEPLOYMENT.md).
+
 ## Configuration
 
 `BasinRAGConfig` accepts explicit values. Configuration precedence is **explicit constructor/CLI arguments > process environment > `.env` > class defaults**. The process environment wins over values loaded from `.env`.
@@ -96,7 +107,7 @@ To call the ASGI application directly, use `uvicorn basinrag.api.server:app`. Pu
 | `BASINRAG_LLM_MODEL` | `qwen2.5` | Chat/L3 model name. |
 | `BASINRAG_SEARCH_TYPE` | `auto` | Default retrieval mode. |
 | `BASINRAG_RANKING_MODE` | `hybrid_rrf` | `hybrid_rrf` or opt-in `experimental_topology`. |
-| `BASINRAG_USE_RERANK` | `true` | Enable the cross-encoder after retrieval. |
+| `BASINRAG_USE_RERANK` | `false` | Opt in to the cross-encoder after retrieval on chunked indexes. |
 | `BASINRAG_CHUNK_SIZE` | `512` | Legacy chunk size in characters. |
 | `BASINRAG_CHUNK_OVERLAP` | `128` | Legacy overlap in characters. |
 | `BASINRAG_CHUNK_SIZE_TOKENS` | unset | Optional token-based chunk limit, bounded by encoder capacity. |
@@ -109,6 +120,9 @@ To call the ASGI application directly, use `uvicorn basinrag.api.server:app`. Pu
 | `BASINRAG_ENV` | `production` | `local_dev` only with explicit keyless opt-in and loopback bind. |
 | `BASINRAG_ENABLE_BACKGROUND_L3` | `false` | Enable background summarization. |
 | `BASINRAG_ALLOW_REMOTE_L3_EGRESS` | `false` | Separately opt in to sending excerpts to a remote LLM for L3. |
+| `BASINRAG_BM25_STEMMING` | `false` | Optional BM25 stemming; recorded in the snapshot manifest. |
+| `BASINRAG_CONTEXT_WINDOW_TOKENS` | `8192` | Chat context window. |
+| `BASINRAG_GENERATION_RESERVE_TOKENS` | `1024` | Tokens reserved for generation. |
 
 The `.env.example` file lists these settings. Legacy character-based chunk arguments remain supported; chunks that exceed the encoder’s token capacity are automatically split again, and token settings are additive. Existing indexes are not silently rewritten when chunk settings change.
 
@@ -122,14 +136,18 @@ The API requires a key at startup unless `BASINRAG_ENV=local_dev` and `BASINRAG_
 
 Benchmark artifacts already in the repository are historical and may predate the current source changes. Do not treat them as a current release score. Re-run each evaluation into a fresh output directory; the report should include the revision, model, corpus/split, configuration, requested tasks, and successful tasks. Never aggregate stale task files or report an incomplete run as a complete mean.
 
-See [BENCHMARKS.md](BENCHMARKS.md) for the reproduction protocol and metric boundaries. SWE-bench file-retrieval metrics are not SWE-bench `% Resolved`; only patches evaluated by the official Docker harness support that claim.
+See [BENCHMARKS.md](BENCHMARKS.md) for the reproduction protocol and [docs/EVAL.md](docs/EVAL.md) for gate commands and single-task measurements. SWE-bench file-retrieval metrics are not SWE-bench `% Resolved`; only patches evaluated by the official Docker harness support that claim.
 
 ## Documentation
 
+- [Ranking (flat vs long-doc)](docs/RANKING.md)
+- [Evaluation](docs/EVAL.md)
 - [Benchmark protocol](BENCHMARKS.md)
 - [Architecture](ARCHITECTURE.md)
 - [API reference](docs/API_REFERENCE.md)
-- [Deployment guide](docs/DEPLOYMENT.md)
+- [Deployment](docs/DEPLOYMENT.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
 - [Portuguese README](README_pt.md)
 - [Docs index](docs/INDEX.md)
 

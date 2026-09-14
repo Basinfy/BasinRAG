@@ -1,8 +1,10 @@
-# Fase 0 gate
+# Gate SciFact + QASPER
 
 Runner: `python -m basinrag.eval.run_gate`
 
-- `scifact.json` — controle negativo (1 doc = 1 bacia)
-- `decision.json` — protocolo, métricas, `DECISION=CONVERT_C`
+Documentação: [docs/EVAL.md](../../docs/EVAL.md). Os JSON deste diretório, se existirem localmente, são artefatos de run e **não** entram no Git.
 
-QASPER via Hugging Face não carrega mais (dataset script). O corpus longo usou `ccdv/arxiv-summarization` (validation, streaming): 80 papers, mediana de 20 membros/bacia.
+- SciFact: controle flat (1 documento = 1 nó).
+- QASPER: long-doc oficial (tarball v0.3). Não use dataset script Hugging Face nem ArXiv como substituto.
+- Decisão de métricas (`decision.json`) exige as duas tarefas no mesmo commit, com provenance compatível.
+- Ranking de produto: `hybrid_rrf` sem cross-encoder (`--skip-rerank`).

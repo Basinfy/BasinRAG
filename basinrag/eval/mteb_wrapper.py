@@ -200,7 +200,7 @@ class BasinRAGMTEBWrapper:
             return bool(self.use_rerank)
         if self.auto_disable_rerank_on_flat and self._is_flat_index:
             return False
-        return True
+        return False  # CE is opt-in; unspecified means off
 
     def search(
         self,

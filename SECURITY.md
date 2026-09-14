@@ -6,7 +6,8 @@ We actively provide security updates for the current major/minor release:
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.0.x   | :white_check_mark: |
+| 1.1.x   | :white_check_mark: |
+| 1.0.x   | :x:                |
 | < 1.0.0 | :x:                |
 
 ---
@@ -39,7 +40,8 @@ If you believe you have found a security vulnerability in BasinRAG:
 ## Deployment Security Guidelines
 
 When deploying BasinRAG in production environments:
-1. **API Authentication**: Set `BASINRAG_API_KEY` to enforce bearer token authentication on REST and WebSocket endpoints.
+1. **API Authentication**: Set `BASINRAG_API_KEY` and send `Authorization: Bearer`. Routes have no `/v2` prefix (`POST /query`, `WS /chat`). Keyless mode is only `local_dev` + `BASINRAG_ALLOW_KEYLESS_LOCAL=true` on loopback.
 2. **CORS Restrictions**: Do not allow wildcard `*` origins in production; explicitly configure trusted frontend domains.
 3. **Storage Directory**: Ensure the `.basinrag` directory has restricted filesystem permissions (`chmod 700`).
 4. **LLM Credentials**: Never commit API keys or provider tokens into repositories; utilize environment variables.
+5. **Retrieved text**: Treat passages as untrusted evidence, not instructions. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).

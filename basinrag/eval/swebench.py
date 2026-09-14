@@ -328,7 +328,7 @@ class SWEBenchEvaluator:
         split: str = "test",
         encoder_model: str = "BAAI/bge-base-en-v1.5",
         reranker_model: str = "BAAI/bge-reranker-v2-m3",
-        use_rerank: bool = True,
+        use_rerank: bool = False,
         query_prompt: str = "Represent this sentence for searching relevant passages: ",
         ranking_mode: Optional[str] = None,
     ) -> Dict[str, Any]:

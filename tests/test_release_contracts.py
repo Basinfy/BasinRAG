@@ -23,6 +23,10 @@ def test_public_python_snippet_and_version_are_current():
     api_docs = (ROOT / "docs" / "API_REFERENCE.md").read_text(encoding="utf-8")
     assert "/query" in api_docs and "/chat" in api_docs
     assert "/v2/" not in api_docs
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    unreleased = changelog.split("## [1.0.4]", 1)[0]
+    assert "API moved to `/v2`" not in unreleased
+    assert "/v2/" not in unreleased
 
 
 def test_repository_has_no_approved_quantitative_release_claims():

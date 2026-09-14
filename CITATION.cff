@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-message: "If you use this software, please cite it as below."
+message: "If you use this software, please cite it as below. Package version 1.1.0 is unreleased until a git tag is published."
 title: "BasinRAG: Hybrid Retrieval with Dynamical Basins as Briefing Maps"
 authors:
   - family-names: "Martins"

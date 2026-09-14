@@ -47,7 +47,7 @@ class BasinRAGConfig:
     generation_reserve_tokens: int = 1024
     min_confidence: float = 0.15
     query_prompt: str = QUERY_PROMPT
-    use_rerank: bool = True
+    use_rerank: bool = False
     ranking_mode: RankingMode = "hybrid_rrf"
     enable_background_l3: bool = False
     allow_remote_l3_egress: bool = False

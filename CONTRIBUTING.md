@@ -69,6 +69,11 @@ Seguimos a convenção de [Conventional Commits](https://www.conventionalcommits
    - Foram adicionados testes suficientes.
    - A documentação (Docstrings e manuais) foi atualizada de acordo.
    - Os commits respeitam as convenções estabelecidas.
+   - Claims quantitativos citam commit, comando, corpus/split e diretório de run; não publique média MTEB incompleta. Ver [docs/EVAL.md](docs/EVAL.md) e [BENCHMARKS.md](BENCHMARKS.md).
+
+## Benchmarks
+
+Não trate `docs/archive/`, papers LaTeX ou JSON em `results/` como score vigente. O ranking de produção é `hybrid_rrf` sem cross-encoder. Hop/DRF só entram com `experimental_topology` e ablação.
 
 ## Código de Conduta e Comunicação
 

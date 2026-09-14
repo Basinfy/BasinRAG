@@ -8,8 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Breaking changes
-- Identificador de pacote planejado: `1.1.0`. Apesar do número minor solicitado, o formato interno do snapshot e a API foram alterados. Rotas públicas não usam prefixo de versão; o diretório padrão é `.basinrag`. Reindexe fontes originais em destino novo e vazio, mantendo o root antigo para rollback.
-- API moved to `/v2`; authentication uses `Authorization: Bearer`, and query output is structured.
+- Identificador de pacote planejado: `1.1.0`. Apesar do número minor solicitado, o formato interno do snapshot e a API foram alterados. Rotas públicas não usam prefixo de versão (`GET /livez`, `GET /readyz`, `POST /query`, `WS /chat`); o diretório padrão é `.basinrag`. Reindexe fontes originais em destino novo e vazio, mantendo o root antigo para rollback.
+- Authentication uses `Authorization: Bearer`, and query output is structured. Public routes are unversioned (`/livez`, `/readyz`, `/query`, `/chat`).
 
 ### Security and persistence
 - Require API keys except explicitly opted-in local development on loopback; validate WebSocket Origin and bound message size, time, connections, and concurrent generations.
@@ -19,8 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Retrieval and evaluation
 - Keep `hybrid_rrf` as default; hop/DRF ranking remains experimental. Bacias still partition the index and the default briefing hydrates rho-tree siblings after RRF seeds. Flat 1:1 basins add no extra context. Gate decisions require complete, provenance-compatible SciFact and QASPER runs; partial MTEB runs do not publish official means.
 - Existing benchmark artifacts and papers are historical records, not current release claims. This changelog does not approve quantitative claims.
-- Dense-led RRF: BM25 votes only inside the dense/expanded pool; `HYBRID_ALPHA` 0.15 on flat indexes. Chunked long-doc indexes use sentence-window leaves (~1–2 sentences), `LONGDOC_HYBRID_ALPHA` 0.40, `max(200, top_k*10)` candidates, RM3-style lexical expansion without an LLM, document round-robin, BM25@10 membership, and a quota of 2 BM25-only papers spliced at rank 3. The default cross-encoder runs after that pool on chunked indexes only; SciFact stays on the flat path without CE. The MTEB wrapper writes snapshot metadata v3 and does not pass MTEB `top_k=1000` into `configure()`.
+- Dense-led RRF: BM25 votes only inside the dense/expanded pool; `HYBRID_ALPHA` 0.15 on flat indexes. Chunked long-doc indexes use sentence-window leaves (~1–2 sentences), `LONGDOC_HYBRID_ALPHA` 0.40, `max(200, top_k*10)` candidates, RM3-style lexical expansion without an LLM, document round-robin, BM25@10 membership, and a quota of 2 BM25-only papers spliced at rank 3. Cross-encoder rerank is opt-in (`use_rerank` / `BASINRAG_USE_RERANK`); when enabled it runs after that pool on chunked indexes only. SciFact stays on the flat path without CE. The MTEB wrapper writes snapshot metadata v3 and does not pass MTEB `top_k=1000` into `configure()`.
 - SciFact MTEB on `c1da17e` (`results/runs/mteb-20260913-173459`, no rerank, `BAAI/bge-base-en-v1.5`): nDCG@10 0.74389. Single-task measurement only; not a five-task or twelve-task release mean.
+
+### Documentation
+- Ranking and eval contracts live in `docs/RANKING.md` and `docs/EVAL.md`. Public docs no longer treat hop/CE as production defaults. Unused marketing JPEGs and the petroleum-basin placeholder page were removed.
 
 ## [1.0.4] - 2026-09-09
 
@@ -94,7 +97,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Integração com BEIR/MTEB (SciFact). O número de 50 queries foi recolhido; ver gate CONVERT_C.
   - Avaliação no SWE-bench Lite (Hit@1 30.8%).
   - MTEB Hugging Face (SciFact 300 queries — NDCG@10 0.650, Recall@1000 98.7%).
-- **Infraestrutura Aberta**: Documentação completa (`ARCHITECTURE.md`, `BENCHMARKS.md`, `CONTRIBUTING.md`, `LICENSE` MIT).
+- **Infraestrutura Aberta**: Documentação completa (`ARCHITECTURE.md`, `BENCHMARKS.md`, `CONTRIBUTING.md`). A licença nesta tag era MIT; a partir de [1.0.3] o projeto passou a Apache 2.0.
 
 ---
 

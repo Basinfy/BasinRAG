@@ -75,7 +75,6 @@ def _make_retriever(monkeypatch, *, ranking_mode="hybrid_rrf", search_type="auto
         search_type=search_type,
         top_k=2,
         ranking_mode=ranking_mode,
-        use_rerank=False,
     )
     return retriever, hybrid
 
@@ -129,6 +128,24 @@ def test_default_mode_hydrates_basin_siblings_after_rrf_seeds(monkeypatch):
     assert packet.hubs == ["seed A", "seed B"]
     assert "topology-c" in packet.node_ids
     assert "topology context" in packet.neighbors
+
+
+def test_brief_skips_cross_encoder_by_default_on_longdoc(monkeypatch):
+    retriever, _hybrid = _make_retriever(monkeypatch, search_type="hybrid")
+    assert retriever.use_rerank is False
+    retriever.engine.graph.nodes["seed-b"]["chunk_index"] = 1
+    retriever.engine.basins = {"b": object()}
+    calls = []
+
+    class _RR:
+        def rerank_items(self, _query, items, top_k=None):
+            calls.append(list(items))
+            return list(reversed(items))[:top_k]
+
+    retriever._reranker = _RR()
+    packet = retriever.brief("a representative question", top_k=2)
+    assert calls == []
+    assert packet.node_ids[:2] == ["seed-a", "seed-b"]
 
 
 def test_brief_skips_cross_encoder_on_flat_index(monkeypatch):

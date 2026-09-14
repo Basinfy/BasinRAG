@@ -8,8 +8,8 @@ Este documento acompanha a preparação do BasinRAG 1.1.0. A versão ainda não 
 
 - O leitor aceita o formato atual de snapshot. Índices legados não são atualizados automaticamente nem escritos durante a tentativa de abertura.
 - O diretório padrão é `.basinrag`. Para rollback, mantenha o pacote e o root anteriores intactos.
-- As rotas são `/query`, `/chat`, `/livez` e `/readyz`, sem prefixo de versão. A API exige `Authorization: Bearer`; não envie credenciais na URL.
-- `hybrid_rrf` é o ranking padrão. A expansão topológica é experimental. Sumarização L3 em background vem desligada; egress de trechos para um provedor remoto requer os dois opt-ins.
+- As rotas são `POST /query`, `WS /chat`, `GET /livez` e `GET /readyz`, sem prefixo de versão. A API exige `Authorization: Bearer`; não envie credenciais na URL.
+- `hybrid_rrf` é o ranking padrão. Hop/DRF no ranking são `experimental_topology`. O cross-encoder é opt-in (`BASINRAG_USE_RERANK`). Sumarização L3 em background vem desligada; egress de trechos para um provedor remoto requer os dois opt-ins.
 - A versão de pacote é `1.1.0`; o número não altera a exigência de migração incompatível descrita acima.
 
 ## Migração segura

@@ -35,7 +35,7 @@ for d in docs:
     print(d)
 ```
 
-Chunks padrão: **512 / overlap 128**.
+Chunks padrão de ingestão: **512 / overlap 128**. Ranking: [RANKING.md](RANKING.md). Avaliação: [EVAL.md](EVAL.md).
 
 ### CLI
 
@@ -55,6 +55,8 @@ basinrag serve --port 8000
 
 ## 5. Próximos passos
 
+- [Ranking](RANKING.md)
+- [Avaliação](EVAL.md)
 - [API Reference](API_REFERENCE.md)
 - [Arquitetura](../ARCHITECTURE.md)
 - [Deploy](DEPLOYMENT.md)

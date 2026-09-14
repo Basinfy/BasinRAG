@@ -1,10 +1,10 @@
 # Arquitetura do BasinRAG
 
-BasinRAG é um RAG híbrido **BM25 + FAISS** com bacias de atração como **mapa de briefing** (vizinhança de contexto para o LLM). Números de ranking: [`BENCHMARKS.md`](BENCHMARKS.md).
+BasinRAG é um RAG híbrido **BM25 + FAISS** com bacias de atração como **mapa de briefing** (vizinhança de contexto para o LLM). Ranking de produção: [`docs/RANKING.md`](docs/RANKING.md). Números: [`BENCHMARKS.md`](BENCHMARKS.md) e [`docs/EVAL.md`](docs/EVAL.md).
 
 ## 1. Visão geral
 
-Documentos são estruturados com um grafo funcional sequencial e partições em bacias; a recuperação combina lexical e denso. A topologia confina e expande **contexto**; o ranking em benchmarks flat segue o path híbrido (e o encoder).
+Documentos são estruturados com um grafo funcional sequencial e partições em bacias; a recuperação combina lexical e denso. A topologia confina e expande **contexto**; o ranking em `hybrid_rrf` não usa hop/DRF.
 
 ```mermaid
 graph TD
@@ -19,11 +19,11 @@ graph TD
         Q[Query] --> R[Router global / hybrid / local]
         R --> S1[BM25]
         R --> S2[FAISS + prompt BGE]
-        S1 --> T[RRF ± hop prior]
+        S1 --> T[RRF — hybrid_rrf]
         S2 --> T
-        T --> U[CE opcional — off em flat MTEB]
+        T --> U[CE opt-in — só índice fatiado]
         U --> V[BriefingPacket]
-        F -. vizinhança .-> V
+        F -. irmãos ρ .-> V
     end
 ```
 
@@ -62,22 +62,26 @@ Profundidade topológica $h(v)$ relativa ao atrator. Em corpora **flat** (1 doc 
 
 ## 4. Pipeline de recuperação
 
+Contrato detalhado: [`docs/RANKING.md`](docs/RANKING.md).
+
 ```mermaid
 graph TD
     Q[Query] --> IR{Router}
     IR -->|global / hybrid| C[BM25 + FAISS corpus-wide]
     IR -->|local| L[Expansão intra-bacia / PPR]
     C --> RRF[RRF]
-    L --> RRF
-    RRF --> Hop[Hop prior opcional]
-    Hop --> RR[CE opcional]
-    RR --> Pack[BriefingPacket]
+    L --> Pack
+    RRF --> RR[CE opt-in se índice fatiado]
+    RR --> Pack[BriefingPacket + irmãos ρ]
 ```
 
-* **Router:** regex + centroides → `global` / `hybrid` / `local`.  
-* **RRF** ponderado; hop prior com `missing=neutral` em produção (`penalty` só no gate).  
-* **Cross-encoder:** `BAAI/bge-reranker-v2-m3` quando ligado; em índices **flat** no path MTEB fica **desligado por padrão**.  
-* **Briefing:** hubs, vizinhos, metadados de bacia — entrada para o LLM, não métrica MTEB.
+**Default (`hybrid_rrf`):** RRF ponderado. Hop/DRF não reordenam sementes. `brief()` hidrata irmãos da árvore ρ depois das sementes. Índices flat 1:1 não acrescentam contexto de bacia.
+
+**Opt-in (`experimental_topology`):** hop prior (`missing=neutral` no produto experimental; `penalty` só no gate) e DRF entram no ranking. Avaliar por ablação.
+
+- **Router:** regex + centroides → `global` / `hybrid` / `local`.
+- **Cross-encoder:** desligado por padrão. Se `use_rerank=True`, `BAAI/bge-reranker-v2-m3` só em índices fatiados.
+- **Briefing:** hubs, vizinhos, metadados de bacia — entrada para o LLM, não métrica MTEB.
 
 ## 5. Sumarização L3 em background
 

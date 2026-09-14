@@ -59,10 +59,10 @@ graph TD
 
 ## Benchmarks e evidências
 
-Os resultados existentes são históricos e não sustentam claims atuais. Não há pontuação de release declarada até uma execução completa, válida e reproduzível. Protocolo e critérios: [`BENCHMARKS.md`](BENCHMARKS.md). SWE-bench `% Resolved` não é uma métrica de BasinRAG sem patches avaliados pelo harness oficial.
+Os resultados existentes são históricos e não sustentam claims atuais. Não há pontuação de release declarada até uma execução completa, válida e reproduzível. Protocolo: [`BENCHMARKS.md`](BENCHMARKS.md). Gate e medições pontuais: [`docs/EVAL.md`](docs/EVAL.md). SWE-bench `% Resolved` não é uma métrica de BasinRAG sem patches avaliados pelo harness oficial.
 
 ```powershell
-python -m basinrag.eval.run_mteb --no-rerank --tasks SciFact,NFCorpus,FiQA2018,ArguAna,SCIDOCS --output results/runs/mteb-$(Get-Date -Format 'yyyyMMdd-HHmmss')
+python -m basinrag.eval.run_gate --output results/runs/gate-$(Get-Date -Format 'yyyyMMdd-HHmmss') --skip-rerank
 ```
 
 ---
@@ -73,7 +73,7 @@ python -m basinrag.eval.run_mteb --no-rerank --tasks SciFact,NFCorpus,FiQA2018,A
 - Bacias / PPR para expansão de **briefing** local  
 - Router `global` / `hybrid` / `local`  
 - L3 opcional em background  
-- Persistência atômica + FastAPI `/query` e WebSocket `/chat`
+- Persistência atômica + FastAPI `POST /query` e WebSocket `/chat` (sem prefixo `/v2`)
 
 ### Em relação a outros paradigmas
 
@@ -88,7 +88,7 @@ python -m basinrag.eval.run_mteb --no-rerank --tasks SciFact,NFCorpus,FiQA2018,A
 ## Instalação
 
 ```bash
-pip install -e ".[dev,api,ollama]"
+python -m pip install -e ".[dev,api,ollama]"
 ```
 
 ## Quickstart
@@ -117,6 +117,17 @@ basinrag reindex ./meus_documentos --storage-dir ./.basinrag
 
 `ingest` é aditivo: fonte nova entra, inalterada é no-op e alterada exige `sync`. A publicação é atômica; falhas de leitura não publicam alterações parciais.
 
+## API HTTP
+
+| Rota | Função |
+|---|---|
+| `GET /livez` | Processo ativo |
+| `GET /readyz` | Snapshot pronto |
+| `POST /query` | Retrieval (`Authorization: Bearer`) |
+| `WS /chat` | Chat em streaming |
+
+Não há prefixo `/v2`. Detalhes: [docs/API_REFERENCE.md](docs/API_REFERENCE.md).
+
 ## Configuração
 
 | Variável | Padrão | Descrição |
@@ -125,12 +136,17 @@ basinrag reindex ./meus_documentos --storage-dir ./.basinrag
 | `BASINRAG_STORAGE_DIR` | `.basinrag` | Diretório de armazenamento |
 | `BASINRAG_LLM_PROVIDER` | `ollama` | Chat / L3 |
 | `BASINRAG_LLM_MODEL` | `qwen2.5` | Modelo de chat |
+| `BASINRAG_SEARCH_TYPE` | `auto` | `auto`, `hybrid`, `local`, `global` |
 | `BASINRAG_RANKING_MODE` | `hybrid_rrf` | `experimental_topology` é opt-in |
+| `BASINRAG_USE_RERANK` | `false` | Cross-encoder opt-in; índices flat ignoram |
 | `BASINRAG_API_KEY` | não definido | Obrigatório ao iniciar a API, salvo opt-in local explícito |
 | `BASINRAG_CORS_ORIGINS` | origens localhost | Origens separadas por vírgula; wildcard é rejeitado em produção |
 | `BASINRAG_ENV` | `production` | `local_dev` só com opt-in sem chave e bind loopback |
 | `BASINRAG_ENABLE_BACKGROUND_L3` | `false` | L3 local em background, desligado por padrão |
 | `BASINRAG_ALLOW_REMOTE_L3_EGRESS` | `false` | Segundo opt-in para envio de trechos a LLM remoto |
+| `BASINRAG_BM25_STEMMING` | `false` | Stemming BM25 opcional |
+| `BASINRAG_CONTEXT_WINDOW_TOKENS` | `8192` | Janela de contexto do chat |
+| `BASINRAG_GENERATION_RESERVE_TOKENS` | `1024` | Reserva para geração |
 | `BASINRAG_CHUNK_SIZE` | `512` caracteres | Tamanho do chunk legado |
 | `BASINRAG_CHUNK_OVERLAP` | `128` caracteres | Overlap legado |
 | `BASINRAG_CHUNK_SIZE_TOKENS` | não definido | Limite opcional de tokens do encoder |
@@ -144,10 +160,14 @@ Por padrão, a API exige chave mesmo em loopback. O modo sem chave requer `BASIN
 
 ## Documentação
 
+- [Ranking](docs/RANKING.md)
+- [Avaliação](docs/EVAL.md)
 - [BENCHMARKS.md](BENCHMARKS.md)
 - [ARCHITECTURE.md](ARCHITECTURE.md)
-- [docs/INDEX.md](docs/INDEX.md)
-- [Índice da documentação](docs/INDEX.md)
+- [API](docs/API_REFERENCE.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [SECURITY.md](SECURITY.md)
+- [Índice](docs/INDEX.md)
 
 ## Citação
 

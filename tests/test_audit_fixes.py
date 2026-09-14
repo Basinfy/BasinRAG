@@ -22,6 +22,7 @@ def test_default_huggingface_models_are_pinned():
     config = BasinRAGConfig()
     assert config.encoder_revision == "dd9f42942e0729b6c53632f3c23b0e801f236569"
     assert config.reranker_revision == "c4b98d26050227d7b53a54437302be5aa412b70e"
+    assert config.use_rerank is False
 
 
 def test_custom_models_require_immutable_commit_revisions():

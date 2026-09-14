@@ -65,3 +65,8 @@ results/mteb_fase*_test2/
 results/mteb_optimized/
 results/mteb_test/
 
+# Local debug / history-rewrite leftovers
+.test_debug/
+.test_debug*/
+.git-rewrite/
+

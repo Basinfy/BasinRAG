@@ -65,7 +65,7 @@ def audit_query_stages(
     relevant: Set[str],
     top_k: int = 10,
     candidate_k: Optional[int] = None,
-    use_rerank: bool = True,
+    use_rerank: bool = False,
 ) -> Dict[str, Any]:
     """Trace one query through BM25 → dense → RRF → hop → optional CE."""
     ck = candidate_k if candidate_k is not None else max(50, top_k * 5)

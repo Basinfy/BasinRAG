@@ -1,6 +1,6 @@
 # 🔬 Auditoria Completa do BasinRAG v1.0.0-rc.1
 
-> Relatório de análise minuciosa de especialista em RAG, cobrindo arquitetura, indexação, retrieval, API, testes e fundamentos matemáticos.
+> Arquivado. Descreve um checkout **v1.0.0-rc.1**. Não é auditoria da 1.1.0. Links apontam para o código no repositório (caminhos relativos); números e bugs citados podem já ter sido corrigidos.
 
 **Data:** 2026-09-06 | **Arquivos analisados:** 35+ | **Findings:** 20
 
@@ -35,35 +35,35 @@ pie title Distribuição de Findings por Severidade
 A implementação dos **Grafos Funcionais Discretos** é matematicamente sólida e elegante:
 
 - O grafo $\phi$ corretamente impõe grau de saída ≤ 1 para o backbone estrutural
-- [`detect_attractors`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/core/functional_graph.py#L89-L122) usa um DFS de 3 estados em $O(V)$ que resolve sinks e ciclos deterministicamente
-- A **Profundidade Topológica** via BFS reverso ([`reverse_hops`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/core/functional_graph.py#L131-L155)) está correta
+- [`detect_attractors`](../../basinrag/core/functional_graph.py#L89-L122) usa um DFS de 3 estados em $O(V)$ que resolve sinks e ciclos deterministicamente
+- A **Profundidade Topológica** via BFS reverso ([`reverse_hops`](../../basinrag/core/functional_graph.py#L131-L155)) está correta
 - A **separação estrita** entre arestas $\phi$ estruturais e sinapses kNN semânticas é mantida em toda a codebase
 
 > [!TIP]
 > O design topológico determinístico é o grande diferencial do BasinRAG. Enquanto GraphRAG depende de clustering estocástico (Leiden), o BasinRAG garante partições reproduzíveis — uma vantagem real para produção.
 
 ### 2. Prior de Decaimento Topológico (Fusão RRF)
-A fórmula implementada em [`fusion.py`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/retriever/fusion.py#L27-L37):
+A fórmula implementada em [`fusion.py`](../../basinrag/retriever/fusion.py#L27-L37):
 
 $$S_{\text{final}}(v) = S_{\text{RRF}}(v) \cdot (0.7 + 0.3 \cdot e^{-h(v) \cdot \lambda})$$
 
 É uma das melhores práticas do projeto. O floor em `0.7` garante que hits BM25 na periferia da seção não sejam apagados, enquanto nós estruturalmente centrais recebem o boost correto.
 
 ### 3. Engenharia de Resiliência
-- **Substituição atômica de diretórios**: [`safe_replace_dir`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/core/persistence.py#L46-L92) com retry e fallback para Windows
-- **Encoding gracioso**: O [ingestor](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/indexer/ingestor.py#L116-L125) testa `utf-8` → `utf-8-sig` → `latin-1` → `autodetect`
-- **JSON parsing resiliente**: [`extract_json_payload`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/indexer/summarizer.py#L22-L43) com 3 estágios de fallback para LLMs locais
+- **Substituição atômica de diretórios**: [`safe_replace_dir`](../../basinrag/core/persistence.py#L46-L92) com retry e fallback para Windows
+- **Encoding gracioso**: O [ingestor](../../basinrag/indexer/ingestor.py#L116-L125) testa `utf-8` → `utf-8-sig` → `latin-1` → `autodetect`
+- **JSON parsing resiliente**: [`extract_json_payload`](../../basinrag/indexer/summarizer.py#L22-L43) com 3 estágios de fallback para LLMs locais
 - **IDs determinísticos (SHA-256)**: Garantem idempotência na re-ingestão
 - **Lazy-loading de módulos pesados**: `__init__.py` usa `__getattr__` para manter CLI instantâneo
 
 ### 4. Pipeline Agentic Draft→Critique→Refine
-O [`BasinSummarizer`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/indexer/summarizer.py#L46-L235) implementa corretamente o loop agentic com:
+O [`BasinSummarizer`](../../basinrag/indexer/summarizer.py#L46-L235) implementa corretamente o loop agentic com:
 - Cap de 2 iterações de refinamento (previne loops infinitos)
 - Semáforo de concorrência (3 bacias simultâneas)
 - Salvamento incremental durante background summarization
 
 ### 5. Sections Adaptativas
-[`adaptive_section_breaks`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/core/functional_graph.py#L31-L59) detecta quebras semânticas por similaridade de cosseno, com fallback para tamanho fixo quando embeddings não estão disponíveis. Design robusto.
+[`adaptive_section_breaks`](../../basinrag/core/functional_graph.py#L31-L59) detecta quebras semânticas por similaridade de cosseno, com fallback para tamanho fixo quando embeddings não estão disponíveis. Design robusto.
 
 ---
 
@@ -74,7 +74,7 @@ O [`BasinSummarizer`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinra
 > [!CAUTION]
 > **Severidade: CRITICAL** — Causa atribuição errada de fontes/citações em produção
 
-**Arquivo:** [`retriever/base.py`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/retriever/base.py#L91-L150)
+**Arquivo:** [`retriever/base.py`](../../basinrag/retriever/base.py#L91-L150)
 
 O reranking em `brief()` reordena e trunca `packet.hubs` e `packet.neighbors`, **mas não reordena `packet.node_ids`**. Em `_get_relevant_documents`, o código assume que `packet.node_ids[i]` corresponde ao texto na posição `i`, mas após o rerank os índices estão completamente desalinhados.
 
@@ -97,7 +97,7 @@ packet.neighbors = [t for t in ordered if t not in hub_set]  # ← reordenado
 > [!CAUTION]
 > **Severidade: CRITICAL** — OOM crash em corpora grandes (>100k chunks)
 
-**Arquivo:** [`core/persistence.py`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/core/persistence.py#L134-L135)
+**Arquivo:** [`core/persistence.py`](../../basinrag/core/persistence.py#L134-L135)
 
 O `DiskKVStore` foi introduzido para prevenir OOM mantendo os mapeamentos `successor` e `attractor_of` em SQLite. Porém, `save_topology` executa:
 
@@ -117,7 +117,7 @@ Isso carrega o banco de dados inteiro na memória, anulando completamente o bene
 > [!CAUTION]
 > **Severidade: CRITICAL** — Background summarizer crasheia imediatamente
 
-**Arquivo:** [`indexer/summarizer.py`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/indexer/summarizer.py#L161)
+**Arquivo:** [`indexer/summarizer.py`](../../basinrag/indexer/summarizer.py#L161)
 
 O objeto `logger` é usado extensivamente em `summarize_all` e `summarize_missing_background` (linhas 161, 176, 178, 201, 215, 221, 225, 234), mas **nunca é importado** neste arquivo. Sempre que essas rotinas rodarem, crasheiam com `NameError: name 'logger' is not defined`.
 
@@ -133,7 +133,7 @@ logger = setup_logging()
 
 ### HIGH-01: Stemming BM25 Baseado em Acentos — Envenenamento do Índice
 
-**Arquivo:** [`indexer/bm25.py`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/indexer/bm25.py#L46-L59) — Linhas 53-59
+**Arquivo:** [`indexer/bm25.py`](../../basinrag/indexer/bm25.py#L46-L59) — Linhas 53-59
 
 A função `stem_token` detecta idioma **por token** verificando se o caracter tem acento Unicode. Sem acento → English stemmer. **~90% das palavras portuguesas** não têm acento ("computador", "gato", "livro", "programa") e serão incorretamente stemmed com regras inglesas.
 
@@ -145,7 +145,7 @@ A função `stem_token` detecta idioma **por token** verificando se o caracter t
 
 ### HIGH-02: Centroides do Router Não Normalizados
 
-**Arquivo:** [`retriever/router.py`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/retriever/router.py#L82-L85) — Linhas 84-85
+**Arquivo:** [`retriever/router.py`](../../basinrag/retriever/router.py#L82-L85) — Linhas 84-85
 
 Em `train_centroids`, os centroides `_global_centroid` e `_hybrid_centroid` são computados via `np.mean()` sobre embeddings normalizados, mas os centroides resultantes **não são re-normalizados**. A classificação por dot product fica matematicamente enviesada para o cluster mais compacto.
 
@@ -161,7 +161,7 @@ cls._hybrid_centroid /= np.linalg.norm(cls._hybrid_centroid)
 
 ### HIGH-03: Amplificação de Ruído no Min-Max Scaling do PPR
 
-**Arquivo:** [`retriever/local_search.py`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/retriever/local_search.py#L155-L158) — Linhas 155-158
+**Arquivo:** [`retriever/local_search.py`](../../basinrag/retriever/local_search.py#L155-L158) — Linhas 155-158
 
 O Personalized PageRank é min-max scaled com `rng` floored em `1e-6`. Em subgrafos com scores PPR quase uniformes (ex: 0.010 e 0.011), o scaling explode a diferença, atribuindo 1.0 a um nó e 0.0 a outro. Isso distorce severamente o score final `0.6 * sim + 0.4 * ppr`.
 
@@ -171,7 +171,7 @@ O Personalized PageRank é min-max scaled com `rng` floored em `1e-6`. Em subgra
 
 ### HIGH-04: Gargalo N+1 Queries — DiskKVStore em Loops Tight
 
-**Arquivo:** [`core/topology.py`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/core/topology.py#L167-L170) + [`core/functional_graph.py`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/core/functional_graph.py#L91-L122)
+**Arquivo:** [`core/topology.py`](../../basinrag/core/topology.py#L167-L170) + [`core/functional_graph.py`](../../basinrag/core/functional_graph.py#L91-L122)
 
 `partition_into_basins` passa `self.successor` (DiskKVStore) diretamente para `detect_attractors` e `reverse_hops`. Esses algoritmos $O(V)$ fazem lookups individuais em loops (`curr = successor.get(curr)`), gerando **milhões de queries SQL sequenciais**.
 
@@ -181,7 +181,7 @@ O Personalized PageRank é min-max scaled com `rng` floored em `1e-6`. Em subgra
 
 ### HIGH-05: SSL Desabilitado para Downloads BEIR
 
-**Arquivo:** [`eval/beir.py`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/eval/beir.py#L20-L22)
+**Arquivo:** [`eval/beir.py`](../../basinrag/eval/beir.py#L20-L22)
 
 `ctx.check_hostname = False` e `ctx.verify_mode = ssl.CERT_NONE` abrem vulnerabilidade para ataques Man-in-the-Middle durante download de datasets de avaliação.
 
@@ -191,7 +191,7 @@ O Personalized PageRank é min-max scaled com `rng` floored em `1e-6`. Em subgra
 
 ### MEDIUM-01: Poluição de Stopwords no L1
 
-**Arquivo:** [`indexer/condensation.py`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/indexer/condensation.py#L13-L15) — Linhas 13-15
+**Arquivo:** [`indexer/condensation.py`](../../basinrag/indexer/condensation.py#L13-L15) — Linhas 13-15
 
 O extrator L1 pega os tokens mais comuns com `len(t) > 3`, mas **não filtra stopwords**. Palavras como "para", "como", "mais", "sobre" dominam os keywords L1, poluindo a densidade semântica.
 
@@ -201,7 +201,7 @@ O extrator L1 pega os tokens mais comuns com `len(t) > 3`, mas **não filtra sto
 
 ### MEDIUM-02: Neighbors Sempre Vazios no Global Search
 
-**Arquivo:** [`retriever/global_search.py`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/retriever/global_search.py#L99-L110) — Linhas 99-110
+**Arquivo:** [`retriever/global_search.py`](../../basinrag/retriever/global_search.py#L99-L110) — Linhas 99-110
 
 A variável `neighbors` é inicializada como `[]` e **nunca populada**. Todos os resultados vão para `hubs`, tornando o `neighbors` lista morta.
 
@@ -211,7 +211,7 @@ A variável `neighbors` é inicializada como `[]` e **nunca populada**. Todos os
 
 ### MEDIUM-03: Token no URL do WebSocket
 
-**Arquivo:** [`api/server.py`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/api/server.py#L91-L95)
+**Arquivo:** [`api/server.py`](../../basinrag/api/server.py#L91-L95)
 
 A autenticação do WebSocket passa o token como query parameter (`?token=...`), que é logado por proxies reversos e CDNs.
 
@@ -221,7 +221,7 @@ A autenticação do WebSocket passa o token como query parameter (`?token=...`),
 
 ### MEDIUM-04: WebSocket Disconnect Logado como Erro
 
-**Arquivo:** [`api/server.py`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/api/server.py#L101-L107)
+**Arquivo:** [`api/server.py`](../../basinrag/api/server.py#L101-L107)
 
 Desconexões normais caem no `except Exception:` genérico e geram stack trace completo nos logs.
 
@@ -231,7 +231,7 @@ Desconexões normais caem no `except Exception:` genérico e geram stack trace c
 
 ### MEDIUM-05: Memory Unbounded para JSON Datasets
 
-**Arquivo:** [`indexer/ingestor.py`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/indexer/ingestor.py#L158-L163)
+**Arquivo:** [`indexer/ingestor.py`](../../basinrag/indexer/ingestor.py#L158-L163)
 
 `ingest_json_dataset` carrega todos os records na memória antes de processar.
 
@@ -242,25 +242,25 @@ Desconexões normais caem no `except Exception:` genérico e geram stack trace c
 ## 📋 Problemas Menores e Melhorias
 
 ### LOW-01: Timing Attack na Verificação de API Key
-[`api/server.py`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/api/server.py#L68) — Usar `secrets.compare_digest()`.
+[`api/server.py`](../../basinrag/api/server.py#L68) — Usar `secrets.compare_digest()`.
 
 ### LOW-02: Normalização L2 Redundante
-[`core/topology.py`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/core/topology.py#L122-L123) — Embeddings já normalizados por `build_ip_index`.
+[`core/topology.py`](../../basinrag/core/topology.py#L122-L123) — Embeddings já normalizados por `build_ip_index`.
 
 ### INFO-01: Ausência de CORS Middleware
-[`api/server.py`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/api/server.py#L55-L59) — Sem `CORSMiddleware` para frontends cross-origin.
+[`api/server.py`](../../basinrag/api/server.py#L55-L59) — Sem `CORSMiddleware` para frontends cross-origin.
 
 ### INFO-02: Ausência de python-dotenv
 `.env.example` existe mas não é carregado automaticamente.
 
 ### INFO-03: Estimativa de Tokens por `len(text) // 4`
-[`retriever/briefing.py`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/basinrag/retriever/briefing.py#L12-L13) — Impreciso para texto multilíngue. Considerar `tiktoken`.
+[`retriever/briefing.py`](../../basinrag/retriever/briefing.py#L12-L13) — Impreciso para texto multilíngue. Considerar `tiktoken`.
 
 ### INFO-04: Diretórios de Cache Hardcoded nos Evals
 Os scripts de avaliação usam `.basinrag/eval_cache` hardcoded.
 
 ### INFO-05: Cobertura de Testes Insuficiente
-[`tests/test_cli.py`](file:///c:/Users/Alex%20Martins/Documents/BasinRAG/tests/test_cli.py) cobre apenas `--help` e `query` sem índice. Faltam testes para `ingest`, `chat`, `serve`.
+[`tests/test_cli.py`](../../tests/test_cli.py) cobre apenas `--help` e `query` sem índice. Faltam testes para `ingest`, `chat`, `serve`.
 
 ---
 

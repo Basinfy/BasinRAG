@@ -16,6 +16,10 @@ SciFact MTEB, split test, 300 queries, `hybrid_rrf`, sem rerank, encoder `BAAI/b
 
 Isso mede só SciFact. Não publique este número como média BEIR nem como score de release.
 
+### QASPER (long-doc; não é release)
+
+Híbrido sem CE, sentence-window, 1005 queries: nDCG@10 **0.430**. Com CE: **0.421**. Detalhe e comandos: [docs/EVAL.md](docs/EVAL.md). O produto deixa o cross-encoder opt-in.
+
 ## Protocolo reproduzível
 
 Execute cada avaliação com um diretório de saída novo e exclusivo. Não reutilize nem mescle diretórios de runs anteriores. Grave a revisão do código, versão de Python e dependências, encoder/tokenizer, corpus e split, parâmetros, tarefas solicitadas e concluídas, e o hardware usado. Um score agregado só representa uma bateria completa se todas as tarefas esperadas concluírem com sucesso nesta mesma execução.
@@ -54,7 +58,7 @@ Essa recuperação **não é `% Resolved`**. O indicador oficial só pode ser pu
 - Encoder padrão: `BAAI/bge-base-en-v1.5` com o prefixo BGE de consulta.
 - Ranking padrão: BM25 + FAISS com RRF; `experimental_topology` é opt-in.
 - Chunk legado: `chunk_size=512` e `chunk_overlap=128`, em caracteres. Opções de tokens são aditivas e devem ser registradas quando usadas.
-- Reranking: documente se habilitado. A arena MTEB reproduzível acima desliga reranking com `--no-rerank`.
+- Reranking: documente se habilitado. Default de produto e a arena MTEB reproduzível acima desligam reranking (`--no-rerank` / `--skip-rerank`).
 - Índice, tokenizer, tamanho/overlap de chunks e batch de embeddings: inclua os valores efetivos no protocolo do run.
 
 Não altere limiares de Flat/HNSW ou pesos de ranking com base em um único run. Para avaliar ANN, compare Recall@k contra busca Flat em uma amostra fixa e informe latência, memória e configuração do índice.

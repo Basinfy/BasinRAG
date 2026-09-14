@@ -29,11 +29,13 @@ Desta forma, a contração para atratores confina o raio de expansão da pesquis
 
 ## 3. Árvores $\rho$ e Decaimento Exponencial de Hops
 
+> Esta fórmula descreve o ranking **`experimental_topology`**. Em produção (`hybrid_rrf`) o RRF ordena as sementes; $h(v)$ estrutura o briefing, não o score. Em corpora flat, $h(v)=0$ e o prior seria identidade mesmo se ligado.
+
 Como não dependemos de extração probabilística de grafos densos, a árvore de predecessores intrafamiliar $\rho$ nos entrega uma coordenada exata de quão profundo é o nó pesquisado perante seu centro contextual.
 
 Introduzimos a função de profundidade topológica $h(v)$, representando a contagem de saltos necessários na árvore $\rho$ para atingir o atrator a partir do fragmento $v$.
 
-Para a agregação de score durante a fase Híbrida do BasinRAG, aplicamos o prior de suavização exponencial topológica:
+No modo experimental, para a agregação de score, aplica-se o prior de suavização exponencial topológica:
 
 $$ S_{\text{topológico}}(v) = S_{\text{RRF}}(v) \cdot \left( \omega_{\min} + (1 - \omega_{\min}) \cdot \exp(-h(v) \cdot \lambda) \right) $$
 

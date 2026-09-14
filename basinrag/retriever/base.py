@@ -24,7 +24,7 @@ class BasinRAGRetriever(BaseRetriever):
     top_k: int = 5
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
     query_prompt: str = QUERY_PROMPT
-    use_rerank: bool = True
+    use_rerank: bool = False
     ranking_mode: str = "hybrid_rrf"
 
     _local: Optional[TopologicalLocalSearch] = None
@@ -54,10 +54,14 @@ class BasinRAGRetriever(BaseRetriever):
             query_prompt=self.query_prompt,
         )
         self._hybrid = HybridSearch(self.engine, self._local)
-        self._reranker = CrossEncoderReranker(
-            model_name=self.reranker_model,
-            max_length=512,
-            revision=reranker_revision,
+        self._reranker = (
+            CrossEncoderReranker(
+                model_name=self.reranker_model,
+                max_length=512,
+                revision=reranker_revision,
+            )
+            if self.use_rerank
+            else None
         )
         self._router = IntelligentQueryRouter(self.encoder, query_prompt=self.query_prompt)
 
@@ -245,7 +249,7 @@ class BasinRAGRetriever(BaseRetriever):
         """Cross-encoder runs after the hybrid pool on chunked indexes only.
 
         Flat SciFact-style corpora keep the published dense-led order. Long-doc
-        QASPER-style indexes may rerank the RRF seeds when ``use_rerank`` is on.
+        QASPER-style indexes may rerank the RRF seeds only when ``use_rerank`` is on.
         """
         return bool(
             self.use_rerank
